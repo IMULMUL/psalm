@@ -2,31 +2,33 @@
 namespace Psalm\Internal\Analyzer\Statements\Expression\Call\Method;
 
 use PhpParser;
+use Psalm\CodeLocation;
+use Psalm\Codebase;
+use Psalm\Context;
 use Psalm\Internal\Analyzer\ClassLikeAnalyzer;
+use Psalm\Internal\Analyzer\ClassLikeNameOptions;
 use Psalm\Internal\Analyzer\FunctionLikeAnalyzer;
 use Psalm\Internal\Analyzer\MethodAnalyzer;
-use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
-use Psalm\Internal\Analyzer\Statements\Expression\CallAnalyzer;
-use Psalm\Internal\Analyzer\Statements\Expression\Call\ClassTemplateParamCollector;
 use Psalm\Internal\Analyzer\Statements\Expression\Call\ArgumentsAnalyzer;
+use Psalm\Internal\Analyzer\Statements\Expression\Call\ClassTemplateParamCollector;
+use Psalm\Internal\Analyzer\Statements\Expression\CallAnalyzer;
+use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
 use Psalm\Internal\Analyzer\StatementsAnalyzer;
 use Psalm\Internal\Codebase\InternalCallMapHandler;
 use Psalm\Internal\Codebase\VariableUseGraph;
-use Psalm\Codebase;
-use Psalm\CodeLocation;
-use Psalm\Context;
 use Psalm\Internal\MethodIdentifier;
 use Psalm\Issue\MixedMethodCall;
 use Psalm\IssueBuffer;
 use Psalm\Type;
 use Psalm\Type\Atomic\TNamedObject;
-use function array_values;
-use function array_shift;
-use function get_class;
-use function strtolower;
+
 use function array_merge;
+use function array_shift;
+use function array_values;
 use function count;
+use function get_class;
 use function reset;
+use function strtolower;
 
 /**
  * This is a bunch of complex logic to handle the potential for missing methods,
@@ -144,10 +146,7 @@ class AtomicMethodCallAnalyzer extends CallAnalyzer
                 $context->self,
                 $context->calling_method_id,
                 $statements_analyzer->getSuppressedIssues(),
-                true,
-                false,
-                true,
-                $lhs_type_part->from_docblock
+                new ClassLikeNameOptions(true, false, true, true, $lhs_type_part->from_docblock)
             );
         }
 
@@ -202,7 +201,8 @@ class AtomicMethodCallAnalyzer extends CallAnalyzer
                 ? $statements_analyzer
                 : null,
             $statements_analyzer->getFilePath(),
-            false
+            false,
+            $context->insideUse()
         );
 
         $fake_method_exists = false;
@@ -320,7 +320,9 @@ class AtomicMethodCallAnalyzer extends CallAnalyzer
                         && !$context->collect_mutations
                         ? $statements_analyzer
                         : null,
-                    $statements_analyzer->getFilePath()
+                    $statements_analyzer->getFilePath(),
+                    true,
+                    $context->insideUse()
                 )
             ) {
                 $new_call_context = MissingMethodCallHandler::handleMagicMethod(
@@ -720,7 +722,9 @@ class AtomicMethodCallAnalyzer extends CallAnalyzer
                                 && !$context->collect_mutations
                                     ? $statements_analyzer
                                     : null,
-                                $statements_analyzer->getFilePath()
+                                $statements_analyzer->getFilePath(),
+                                true,
+                                $context->insideUse()
                             )) {
                                 $lhs_type_part = clone $lhs_type_part_new;
                                 $class_storage = $mixin_class_storage;
@@ -786,7 +790,9 @@ class AtomicMethodCallAnalyzer extends CallAnalyzer
                 && !$context->collect_mutations
                     ? $statements_analyzer
                     : null,
-                $statements_analyzer->getFilePath()
+                $statements_analyzer->getFilePath(),
+                true,
+                $context->insideUse()
             )) {
                 $mixin_declaring_class_storage = $codebase->classlike_storage_provider->get(
                     $class_storage->mixin_declaring_fqcln

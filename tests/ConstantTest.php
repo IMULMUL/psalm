@@ -1033,7 +1033,43 @@ class ConstantTest extends TestCase
                     '$dir===' => 'non-empty-string',
                     '$file===' => 'non-empty-string',
                 ]
-            ]
+            ],
+            'noCrashWithStaticInDocblock' => [
+                '<?php
+                    class Test {
+                        const CONST1 = 1;
+
+                        public function test(): void
+                        {
+                            /** @var static::CONST1 */
+                            $a = static::CONST1;
+                        }
+                    }'
+            ],
+            'FuncAndMethInAllContexts' => [
+                '<?php
+                    /** @return \'getMethInFunc\' */
+                    function getMethInFunc(): string{
+                        return __METHOD__;
+                    }
+
+                    /** @return \'getFuncInFunc\' */
+                    function getFuncInFunc(): string{
+                        return __FUNCTION__;
+                    }
+
+                    class A{
+                        /** @return \'A::getMethInMeth\' */
+                        function getMethInMeth(): string{
+                            return __METHOD__;
+                        }
+
+                        /** @return \'getFuncInMeth\' */
+                        function getFuncInMeth(): string{
+                            return __FUNCTION__;
+                        }
+                    }'
+            ],
         ];
     }
 
@@ -1266,7 +1302,23 @@ class ConstantTest extends TestCase
                     function foo(int $s): string {
                         return [1 => "a", 2 => "b"][$s];
                     }',
-                'error_message' => 'offset value of 1|0'
+                'error_message' => "offset value of '1|0"
+            ],
+            'constantWithMissingClass' => [
+                '<?php
+                    class Subject
+                    {
+                        public const DATA = [
+                            MissingClass::TAG_DATA,
+                        ];
+
+                        public function execute(): void
+                        {
+                            /** @psalm-suppress InvalidArrayOffset */
+                            if (self::DATA["a"]);
+                        }
+                    }',
+                'error_message' => 'UndefinedClass',
             ],
         ];
     }

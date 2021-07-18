@@ -2,24 +2,21 @@
 namespace Psalm\Internal\Analyzer\Statements;
 
 use PhpParser;
-use Psalm\Internal\Analyzer\ScopeAnalyzer;
-use Psalm\Internal\Analyzer\StatementsAnalyzer;
 use Psalm\CodeLocation;
 use Psalm\Context;
+use Psalm\Internal\Analyzer\ScopeAnalyzer;
+use Psalm\Internal\Analyzer\StatementsAnalyzer;
 use Psalm\Issue\ContinueOutsideLoop;
 use Psalm\IssueBuffer;
 use Psalm\Type;
 
 class ContinueAnalyzer
 {
-    /**
-     * @return false|null
-     */
     public static function analyze(
         StatementsAnalyzer $statements_analyzer,
         PhpParser\Node\Stmt\Continue_ $stmt,
         Context $context
-    ): ?bool {
+    ): void {
         $count = $stmt->num
             && $stmt->num instanceof PhpParser\Node\Scalar\LNumber
             ? $stmt->num->value
@@ -44,7 +41,7 @@ class ContinueAnalyzer
                     ),
                     $statements_analyzer->getSource()->getSuppressedIssues()
                 )) {
-                    return false;
+                    return;
                 }
             }
         } else {
@@ -75,13 +72,7 @@ class ContinueAnalyzer
             }
 
             foreach ($redefined_vars as $var => $type) {
-                if ($type->hasMixed()) {
-                    if (isset($loop_scope->possibly_redefined_loop_vars[$var])) {
-                        $type->parent_nodes += $loop_scope->possibly_redefined_loop_vars[$var]->parent_nodes;
-                    }
-
-                    $loop_scope->possibly_redefined_loop_vars[$var] = $type;
-                } elseif (isset($loop_scope->possibly_redefined_loop_vars[$var])) {
+                if (isset($loop_scope->possibly_redefined_loop_vars[$var])) {
                     $loop_scope->possibly_redefined_loop_vars[$var] = Type::combineUnionTypes(
                         $type,
                         $loop_scope->possibly_redefined_loop_vars[$var]
@@ -111,7 +102,5 @@ class ContinueAnalyzer
         }
 
         $context->has_returned = true;
-
-        return null;
     }
 }

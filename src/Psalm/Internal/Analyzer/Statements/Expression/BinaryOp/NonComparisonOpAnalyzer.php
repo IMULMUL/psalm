@@ -2,9 +2,9 @@
 namespace Psalm\Internal\Analyzer\Statements\Expression\BinaryOp;
 
 use PhpParser;
-use Psalm\Internal\Analyzer\StatementsAnalyzer;
-use Psalm\Internal\Analyzer\Statements\Expression\BinaryOpAnalyzer;
 use Psalm\Context;
+use Psalm\Internal\Analyzer\Statements\Expression\BinaryOpAnalyzer;
+use Psalm\Internal\Analyzer\StatementsAnalyzer;
 use Psalm\Type;
 
 /**
@@ -34,6 +34,13 @@ class NonComparisonOpAnalyzer
             $stmt_type = Type::getString();
 
             $statements_analyzer->node_data->setType($stmt, $stmt_type);
+            BinaryOpAnalyzer::addDataFlow(
+                $statements_analyzer,
+                $stmt,
+                $stmt->left,
+                $stmt->right,
+                'nondivop'
+            );
 
             return;
         }

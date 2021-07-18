@@ -2,13 +2,13 @@
 namespace Psalm\Internal\Analyzer\Statements\Expression\Fetch;
 
 use PhpParser;
-use Psalm\Internal\Analyzer\ClassLikeAnalyzer;
-use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
-use Psalm\Internal\Analyzer\Statements\Expression\ExpressionIdentifier;
-use Psalm\Internal\Analyzer\StatementsAnalyzer;
-use Psalm\Internal\FileManipulation\FileManipulationBuffer;
 use Psalm\CodeLocation;
 use Psalm\Context;
+use Psalm\Internal\Analyzer\ClassLikeAnalyzer;
+use Psalm\Internal\Analyzer\Statements\Expression\ExpressionIdentifier;
+use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
+use Psalm\Internal\Analyzer\StatementsAnalyzer;
+use Psalm\Internal\FileManipulation\FileManipulationBuffer;
 use Psalm\Issue\ParentNotFound;
 use Psalm\Issue\UndefinedPropertyFetch;
 use Psalm\IssueBuffer;
@@ -18,10 +18,11 @@ use Psalm\Node\Expr\VirtualVariable;
 use Psalm\Node\Name\VirtualFullyQualified;
 use Psalm\Type;
 use Psalm\Type\Atomic\TNamedObject;
-use function strtolower;
-use function in_array;
+
 use function count;
 use function explode;
+use function in_array;
+use function strtolower;
 
 /**
  * @internal
@@ -74,7 +75,8 @@ class StaticPropertyFetchAnalyzer
             ) {
                 $codebase->file_reference_provider->addMethodReferenceToClassMember(
                     $context->calling_method_id,
-                    'use:' . $stmt->class->parts[0] . ':' . \md5($statements_analyzer->getFilePath())
+                    'use:' . $stmt->class->parts[0] . ':' . \md5($statements_analyzer->getFilePath()),
+                    false
                 );
             }
 
@@ -94,8 +96,7 @@ class StaticPropertyFetchAnalyzer
                     new CodeLocation($statements_analyzer->getSource(), $stmt->class),
                     $context->self,
                     $context->calling_method_id,
-                    $statements_analyzer->getSuppressedIssues(),
-                    false
+                    $statements_analyzer->getSuppressedIssues()
                 ) !== true) {
                     return false;
                 }
@@ -360,9 +361,9 @@ class StaticPropertyFetchAnalyzer
         PhpParser\Node\Expr\StaticPropertyFetch $stmt,
         Context $context
     ) : void {
-        $was_inside_use = $context->inside_use;
+        $was_inside_general_use = $context->inside_general_use;
 
-        $context->inside_use = true;
+        $context->inside_general_use = true;
 
         ExpressionAnalyzer::analyze(
             $statements_analyzer,
@@ -370,7 +371,7 @@ class StaticPropertyFetchAnalyzer
             $context
         );
 
-        $context->inside_use = $was_inside_use;
+        $context->inside_general_use = $was_inside_general_use;
 
         $stmt_class_type = $statements_analyzer->node_data->getType($stmt_class) ?: Type::getMixed();
 

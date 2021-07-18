@@ -2,6 +2,12 @@
 namespace Psalm\Internal\Analyzer;
 
 use PhpParser;
+use Psalm\CodeLocation;
+use Psalm\Codebase;
+use Psalm\Context;
+use Psalm\DocComment;
+use Psalm\Exception\DocblockParseException;
+use Psalm\FileManipulation;
 use Psalm\Internal\Analyzer\Statements\Block\DoAnalyzer;
 use Psalm\Internal\Analyzer\Statements\Block\ForAnalyzer;
 use Psalm\Internal\Analyzer\Statements\Block\ForeachAnalyzer;
@@ -9,8 +15,8 @@ use Psalm\Internal\Analyzer\Statements\Block\IfElseAnalyzer;
 use Psalm\Internal\Analyzer\Statements\Block\SwitchAnalyzer;
 use Psalm\Internal\Analyzer\Statements\Block\TryAnalyzer;
 use Psalm\Internal\Analyzer\Statements\Block\WhileAnalyzer;
-use Psalm\Internal\Analyzer\Statements\Expression\AssignmentAnalyzer;
 use Psalm\Internal\Analyzer\Statements\Expression\Assignment\InstancePropertyAssignmentAnalyzer;
+use Psalm\Internal\Analyzer\Statements\Expression\AssignmentAnalyzer;
 use Psalm\Internal\Analyzer\Statements\Expression\Fetch\ClassConstFetchAnalyzer;
 use Psalm\Internal\Analyzer\Statements\Expression\Fetch\ConstFetchAnalyzer;
 use Psalm\Internal\Analyzer\Statements\Expression\Fetch\VariableFetchAnalyzer;
@@ -18,18 +24,12 @@ use Psalm\Internal\Analyzer\Statements\Expression\SimpleTypeInferer;
 use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
 use Psalm\Internal\Analyzer\Statements\ReturnAnalyzer;
 use Psalm\Internal\Analyzer\Statements\ThrowAnalyzer;
-use Psalm\Internal\Scanner\ParsedDocblock;
 use Psalm\Internal\Codebase\DataFlowGraph;
 use Psalm\Internal\Codebase\TaintFlowGraph;
 use Psalm\Internal\Codebase\VariableUseGraph;
 use Psalm\Internal\DataFlow\DataFlowNode;
-use Psalm\Codebase;
-use Psalm\CodeLocation;
-use Psalm\Context;
-use Psalm\DocComment;
-use Psalm\Exception\DocblockParseException;
-use Psalm\FileManipulation;
 use Psalm\Internal\FileManipulation\FileManipulationBuffer;
+use Psalm\Internal\Scanner\ParsedDocblock;
 use Psalm\Issue\ComplexFunction;
 use Psalm\Issue\ComplexMethod;
 use Psalm\Issue\InvalidDocblock;
@@ -38,26 +38,29 @@ use Psalm\Issue\Trace;
 use Psalm\Issue\UndefinedTrace;
 use Psalm\Issue\UnevaluatedCode;
 use Psalm\Issue\UnrecognizedStatement;
+use Psalm\Issue\UnusedForeachValue;
 use Psalm\Issue\UnusedVariable;
 use Psalm\IssueBuffer;
 use Psalm\Plugin\EventHandler\Event\AfterStatementAnalysisEvent;
 use Psalm\Type;
-use function strtolower;
-use function fwrite;
-use const STDERR;
-use function array_filter;
-use function array_merge;
-use function preg_split;
-use function get_class;
-use function strrpos;
-use function strlen;
-use function substr;
+
 use function array_change_key_case;
-use function trim;
 use function array_column;
 use function array_combine;
+use function array_filter;
 use function array_keys;
+use function array_merge;
+use function fwrite;
+use function get_class;
+use function preg_split;
 use function round;
+use function strlen;
+use function strrpos;
+use function strtolower;
+use function substr;
+use function trim;
+
+use const STDERR;
 
 /**
  * @internal
@@ -127,6 +130,16 @@ class StatementsAnalyzer extends SourceAnalyzer
     /** @var ?DataFlowGraph */
     public $data_flow_graph;
 
+    /**
+     * Locations of foreach values
+     *
+     * Used to discern ordinary UnusedVariables from UnusedForeachValues
+     *
+     * @var array<string, list<CodeLocation>>
+     * @psalm-internal Psalm\Internal\Analyzer
+     */
+    public $foreach_var_locations = [];
+
     public function __construct(SourceAnalyzer $source, \Psalm\Internal\Provider\NodeDataProvider $node_data)
     {
         $this->source = $source;
@@ -181,7 +194,7 @@ class StatementsAnalyzer extends SourceAnalyzer
             && $context->check_variables
         ) {
             //var_dump($this->data_flow_graph);
-            $this->checkUnreferencedVars($stmts);
+            $this->checkUnreferencedVars($stmts, $context);
         }
 
         if ($codebase->alter_code && $root_scope && $this->vars_to_initialize) {
@@ -688,7 +701,7 @@ class StatementsAnalyzer extends SourceAnalyzer
     /**
      * @param  array<PhpParser\Node\Stmt>   $stmts
      */
-    public function checkUnreferencedVars(array $stmts): void
+    public function checkUnreferencedVars(array $stmts, Context $context): void
     {
         $source = $this->getSource();
         $codebase = $source->getCodebase();
@@ -763,16 +776,36 @@ class StatementsAnalyzer extends SourceAnalyzer
             $assignment_node = DataFlowNode::getForAssignment($var_id, $original_location);
 
             if (!isset($this->byref_uses[$var_id])
+                && !isset($context->vars_from_global[$var_id])
                 && !VariableFetchAnalyzer::isSuperGlobal($var_id)
                 && $this->data_flow_graph instanceof VariableUseGraph
                 && !$this->data_flow_graph->isVariableUsed($assignment_node)
             ) {
-                $issue = new UnusedVariable(
-                    $var_id . ' is never referenced or the value is not used',
-                    $original_location
-                );
+                $is_foreach_var = false;
+
+                if (isset($this->foreach_var_locations[$var_id])) {
+                    foreach ($this->foreach_var_locations[$var_id] as $location) {
+                        if ($location->raw_file_start === $original_location->raw_file_start) {
+                            $is_foreach_var = true;
+                            break;
+                        }
+                    }
+                }
+
+                if ($is_foreach_var) {
+                    $issue = new UnusedForeachValue(
+                        $var_id . ' is never referenced or the value is not used',
+                        $original_location
+                    );
+                } else {
+                    $issue = new UnusedVariable(
+                        $var_id . ' is never referenced or the value is not used',
+                        $original_location
+                    );
+                }
 
                 if ($codebase->alter_code
+                    && $issue instanceof UnusedVariable
                     && !$unused_var_remover->checkIfVarRemoved($var_id, $original_location)
                     && isset($project_analyzer->getIssuesToFix()['UnusedVariable'])
                     && !IssueBuffer::isSuppressed($issue, $this->getSuppressedIssues())

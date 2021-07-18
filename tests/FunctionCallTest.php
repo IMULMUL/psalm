@@ -792,6 +792,15 @@ class FunctionCallTest extends TestCase
                         if ($t === "object") {}
                     }',
             ],
+            'getTypeSwitchClosedResource' => [
+                '<?php
+                    $data = "foo";
+                    switch (gettype($data)) {
+                        case "resource (closed)":
+                        case "unknown type":
+                            return "foo";
+                    }',
+            ],
             'functionResolutionInNamespace' => [
                 '<?php
                     namespace Foo;
@@ -1057,9 +1066,9 @@ class FunctionCallTest extends TestCase
                 '<?php
                     sscanf("10:05:03", "%d:%d:%d", $hours, $minutes, $seconds);',
                 'assertions' => [
-                    '$hours' => 'float|int|string',
-                    '$minutes' => 'float|int|string',
-                    '$seconds' => 'float|int|string',
+                    '$hours' => 'float|int|null|string',
+                    '$minutes' => 'float|int|null|string',
+                    '$seconds' => 'float|int|null|string',
                 ],
             ],
             'noImplicitAssignmentToStringFromMixedWithDocblockTypes' => [
@@ -1299,7 +1308,7 @@ class FunctionCallTest extends TestCase
                     function foo(string $s) : string {
                         return preg_replace_callback(
                             \'/<files (psalm-version="[^"]+") (?:php-version="(.+)">\n)/\',
-                            /** @param array<int, string> $matches */
+                            /** @param string[] $matches */
                             function (array $matches) : string {
                                 return $matches[1];
                             },
@@ -1417,7 +1426,7 @@ class FunctionCallTest extends TestCase
                 '<?php
                     $data = sscanf("42 psalm road", "%s %s");',
                 [
-                    '$data' => 'list<float|int|string>',
+                    '$data' => 'list<float|int|null|string>|null',
                 ]
             ],
             'sscanfReturnTypeWithMoreThanTwoParameters' => [
@@ -1425,7 +1434,9 @@ class FunctionCallTest extends TestCase
                     $n = sscanf("42 psalm road", "%s %s", $p1, $p2);',
                 [
                     '$n' => 'int',
-                ]
+                    '$p1' => 'float|int|null|string',
+                    '$p2' => 'float|int|null|string',
+                ],
             ],
             'writeArgsAllowed' => [
                 '<?php
@@ -2103,6 +2114,15 @@ class FunctionCallTest extends TestCase
                     /** @var mixed $c */;
                     $a = max($b, $c);',
                 'error_message' => 'MixedAssignment'
+            ],
+            'literalFalseArgument' => [
+                '<?php
+                    function takesAString(string $s): void{
+                        echo $s;
+                    }
+
+                    takesAString(false);',
+                'error_message' => 'InvalidArgument'
             ],
         ];
     }

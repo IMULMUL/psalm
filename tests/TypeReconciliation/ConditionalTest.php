@@ -2589,6 +2589,83 @@ class ConditionalTest extends \Psalm\Tests\TestCase
                     '$c' => 'list<float|int>',
                 ],
             ],
+            'negateTypeInGenericContext' => [
+                '<?php
+
+                 /**
+                  * @template T
+                  */
+                 final class Valid {}
+                 final class Invalid {}
+
+                 /**
+                  * @template T
+                  *
+                  * @param Valid<T>|Invalid $val
+                  * @psalm-assert-if-true Valid<T> $val
+                  */
+                 function isValid($val): bool
+                 {
+                     return $val instanceof Valid;
+                 }
+
+                 /**
+                  * @template T
+                  * @param Valid<T>|Invalid $val
+                  */
+                 function genericContext($val): void
+                 {
+                     $takesValid =
+                         /** @param Valid<T> $_valid */
+                         function ($_valid): void {};
+
+                     $takesInvalid =
+                         /** @param Invalid $_invalid */
+                         function ($_invalid): void {};
+
+                     isValid($val) ? $takesValid($val) : $takesInvalid($val);
+                 }'
+            ],
+            'reconcileMoreThanOneGenericObject' => [
+                '<?php
+
+                 final class Invalid {}
+
+                 /**
+                  * @template T
+                  */
+                 final class Valid {}
+
+                 /**
+                  * @template T
+                  *
+                  * @param Invalid|Valid<T> $val
+                  * @psalm-assert-if-true Valid<T> $val
+                  */
+                 function isValid($val): bool
+                 {
+                     return $val instanceof Valid;
+                 }
+
+                 /**
+                  * @template T
+                  * @param Valid<T>|Invalid $val1
+                  * @param Valid<T>|Invalid $val2
+                  * @param Valid<T>|Invalid $val3
+                  */
+                 function inGenericContext($val1, $val2, $val3): void
+                 {
+                     $takesValid =
+                          /** @param Valid<T> $_valid */
+                          function ($_valid): void {};
+
+                     if (isValid($val1) && isValid($val2) && isValid($val3)) {
+                         $takesValid($val1);
+                         $takesValid($val2);
+                         $takesValid($val3);
+                     }
+                 }'
+            ]
         ];
     }
 

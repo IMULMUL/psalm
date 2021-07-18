@@ -909,6 +909,47 @@ class ReturnTypeTest extends TestCase
                 [],
                 '8.0'
             ],
+            'returnsNullSometimes' => [
+                '<?php
+                    /** @return null */
+                    function f() {
+                        if (rand(0, 1)) {
+                            return null;
+                        }
+                        throw new RuntimeException;
+                    }
+                '
+            ],
+            'scalarLiteralsInferredAfterUndefinedClass' => [
+                '<?php
+                    /** @param object $arg */
+                    function test($arg): ?string
+                    {
+                        /** @psalm-suppress UndefinedClass */
+                        if ($arg instanceof SomeClassThatDoesNotExist) {
+                            return null;
+                        }
+
+                        return "b";
+                    }
+                '
+            ],
+            'docblockNeverReturn' => [
+                '<?php
+                    /** @return never */
+                    function returnsNever() {
+                        exit();
+                    }
+
+                    /** @return false */
+                    function foo() : bool {
+                        if (rand(0, 1)) {
+                            return false;
+                        }
+
+                        returnsNever();
+                    }'
+            ],
         ];
     }
 

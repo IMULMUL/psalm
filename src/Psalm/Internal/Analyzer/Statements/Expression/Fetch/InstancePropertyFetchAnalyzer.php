@@ -2,12 +2,13 @@
 namespace Psalm\Internal\Analyzer\Statements\Expression\Fetch;
 
 use PhpParser;
-use Psalm\Internal\Analyzer\FunctionLikeAnalyzer;
-use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
-use Psalm\Internal\Analyzer\Statements\Expression\ExpressionIdentifier;
-use Psalm\Internal\Analyzer\StatementsAnalyzer;
 use Psalm\CodeLocation;
 use Psalm\Context;
+use Psalm\Internal\Analyzer\FunctionLikeAnalyzer;
+use Psalm\Internal\Analyzer\Statements\Expression\Call\MethodCallAnalyzer;
+use Psalm\Internal\Analyzer\Statements\Expression\ExpressionIdentifier;
+use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
+use Psalm\Internal\Analyzer\StatementsAnalyzer;
 use Psalm\Issue\ImpurePropertyFetch;
 use Psalm\Issue\InvalidPropertyFetch;
 use Psalm\Issue\MixedPropertyFetch;
@@ -19,6 +20,7 @@ use Psalm\IssueBuffer;
 use Psalm\Type;
 use Psalm\Type\Atomic\TNamedObject;
 use Psalm\Type\Atomic\TNull;
+
 use function strtolower;
 
 /**
@@ -32,8 +34,8 @@ class InstancePropertyFetchAnalyzer
         Context $context,
         bool $in_assignment = false
     ) : bool {
-        $was_inside_use = $context->inside_use;
-        $context->inside_use = true;
+        $was_inside_general_use = $context->inside_general_use;
+        $context->inside_general_use = true;
 
         if (!$stmt->name instanceof PhpParser\Node\Identifier) {
             if (ExpressionAnalyzer::analyze($statements_analyzer, $stmt->name, $context) === false) {
@@ -45,7 +47,7 @@ class InstancePropertyFetchAnalyzer
             return false;
         }
 
-        $context->inside_use = $was_inside_use;
+        $context->inside_general_use = $was_inside_general_use;
 
         if ($stmt->name instanceof PhpParser\Node\Identifier) {
             $prop_name = $stmt->name->name;
@@ -177,7 +179,10 @@ class InstancePropertyFetchAnalyzer
 
         if ($stmt_var_type->isNullable() && !$stmt_var_type->ignore_nullable_issues) {
             // we can only be sure that the variable is possibly null if we know the var_id
-            if (!$context->inside_isset && $stmt->name instanceof PhpParser\Node\Identifier) {
+            if (!$context->inside_isset
+                && $stmt->name instanceof PhpParser\Node\Identifier
+                && !MethodCallAnalyzer::hasNullsafe($stmt->var)
+            ) {
                 if (IssueBuffer::accepts(
                     new PossiblyNullPropertyFetch(
                         'Cannot get property on possibly null variable ' . $stmt_var_id . ' of type ' . $stmt_var_type,
@@ -202,6 +207,19 @@ class InstancePropertyFetchAnalyzer
                         );
                     }
                 }
+            }
+
+            $statements_analyzer->node_data->setType($stmt, Type::getMixed());
+
+            if ($codebase->store_node_types
+                && !$context->collect_initializations
+                && !$context->collect_mutations
+            ) {
+                $codebase->analyzer->addNodeType(
+                    $statements_analyzer->getFilePath(),
+                    $stmt->name,
+                    $stmt_var_type->getId()
+                );
             }
 
             return true;
@@ -373,6 +391,7 @@ class InstancePropertyFetchAnalyzer
             }
         }
 
+
         if (($stmt_var_type = $statements_analyzer->node_data->getType($stmt->var))
             && $stmt_var_type->hasObjectType()
             && $stmt->name instanceof PhpParser\Node\Identifier
@@ -386,6 +405,7 @@ class InstancePropertyFetchAnalyzer
 
                     $property_id = $lhs_type_part->value . '::$' . $stmt->name->name;
 
+
                     $class_storage = $codebase->classlike_storage_provider->get($lhs_type_part->value);
 
                     AtomicPropertyFetchAnalyzer::processTaints(
@@ -396,6 +416,21 @@ class InstancePropertyFetchAnalyzer
                         $class_storage,
                         $in_assignment
                     );
+
+                    $declaring_property_class = $codebase->properties->getDeclaringClassForProperty(
+                        $property_id,
+                        true,
+                        $statements_analyzer
+                    );
+
+                    if ($declaring_property_class) {
+                        AtomicPropertyFetchAnalyzer::checkPropertyDeprecation(
+                            $stmt->name->name,
+                            $declaring_property_class,
+                            $stmt,
+                            $statements_analyzer
+                        );
+                    }
 
                     $codebase->properties->propertyExists(
                         $property_id,

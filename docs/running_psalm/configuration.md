@@ -159,7 +159,7 @@ When `true`, strings can be used as classes, meaning `$some_string::someMethod()
   memoizeMethodCallResults="[bool]"
 >
 ```
-When `true`, the results of method calls without arguments passed arguments are remembered between repeated calls of that method on a given object. Defaults to `false`.
+When `true`, the results of method calls without arguments passed are remembered between repeated calls of that method on a given object. Defaults to `false`.
 
 #### hoistConstants
 
@@ -212,6 +212,15 @@ When `true`, Psalm ignores possibly-false issues stemming from return values of 
 >
 ```
 When `true`, Psalm ignores possibly-null issues stemming from return values of internal array functions (like `current`) that may return null, but do so rarely. Defaults to `true`.
+
+#### inferPropertyTypesFromConstructor
+
+```xml
+<psalm
+  inferPropertyTypesFromConstructor="[bool]"
+>
+```
+When `true`, Psalm infers property types from assignments seen in straightforward constructors. Defaults to `true`.
 
 #### findUnusedVariablesAndParams
 ```xml

@@ -1,13 +1,14 @@
 <?php
 namespace Psalm\Internal\Analyzer\Statements\Expression\Call\Method;
 
-use Psalm\Internal\Analyzer\ClassLikeAnalyzer;
-use Psalm\Internal\Analyzer\TraitAnalyzer;
 use Psalm\CodeLocation;
 use Psalm\Context;
+use Psalm\Internal\Analyzer\ClassLikeAnalyzer;
+use Psalm\Internal\Analyzer\TraitAnalyzer;
 use Psalm\Issue\InaccessibleMethod;
 use Psalm\IssueBuffer;
 use Psalm\StatementsSource;
+
 use function array_pop;
 use function end;
 use function strtolower;
@@ -66,6 +67,10 @@ class MethodVisibilityAnalyzer
                     && ($method_id->method_name === 'fromcallable'
                         || $method_id->method_name === '__invoke'))
             ) {
+                return null;
+            }
+
+            if (\Psalm\Internal\Codebase\InternalCallMapHandler::inCallMap((string) $method_id)) {
                 return null;
             }
 
@@ -170,6 +175,7 @@ class MethodVisibilityAnalyzer
 
                 if ($oldest_ancestor_declaring_method_class !== null
                     && !$codebase_classlikes->classExtends($context->self, $oldest_ancestor_declaring_method_class)
+                    && !$codebase_classlikes->classExtends($declaring_method_class, $context->self)
                 ) {
                     if (IssueBuffer::accepts(
                         new InaccessibleMethod(

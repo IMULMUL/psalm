@@ -1,7 +1,7 @@
 <?php
 namespace Psalm\Type\Atomic;
 
-use function preg_replace;
+use function addcslashes;
 use function mb_strlen;
 use function mb_substr;
 
@@ -30,7 +30,8 @@ class TLiteralString extends TString
 
     public function getId(bool $nested = false): string
     {
-        $no_newline_value = preg_replace("/\n/m", '\n', $this->value);
+        // quote control characters, backslashes and double quote
+        $no_newline_value = addcslashes($this->value, "\0..\37\\\"");
         if (mb_strlen($this->value) > 80) {
             return '"' . mb_substr($no_newline_value, 0, 80) . '...' . '"';
         }
@@ -66,6 +67,6 @@ class TLiteralString extends TString
         ?string $this_class,
         bool $use_phpdoc_format
     ): string {
-        return 'string';
+        return $use_phpdoc_format ? 'string' : "'" . $this->value . "'";
     }
 }

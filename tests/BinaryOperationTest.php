@@ -2,6 +2,7 @@
 namespace Psalm\Tests;
 
 use function class_exists;
+
 use const DIRECTORY_SEPARATOR;
 
 class BinaryOperationTest extends TestCase
@@ -106,6 +107,29 @@ class BinaryOperationTest extends TestCase
         $this->analyzeFile('somefile.php', new \Psalm\Context());
     }
 
+    public function testStringFalseInequivalence(): void
+    {
+        $config = \Psalm\Config::getInstance();
+        $config->strict_binary_operands = true;
+
+        $this->addFile(
+            'somefile.php',
+            '<?php
+                function returnsABool(): bool {
+                    return rand(1, 2) === 1;
+                }
+
+                if (returnsABool() !== false) {
+                    echo "hi!";
+                }'
+        );
+
+        $this->expectException(\Psalm\Exception\CodeException::class);
+        $this->expectExceptionMessage('RedundantIdentityWithTrue');
+
+        $this->analyzeFile('somefile.php', new \Psalm\Context());
+    }
+
     /**
      * @return iterable<string,array{string,assertions?:array<string,string>,error_levels?:string[]}>
      */
@@ -200,10 +224,8 @@ class BinaryOperationTest extends TestCase
                         return $arg;
                     }
 
-                    /** @var "a"|"b" */
-                    $foo = "a";
-                    /** @var "c"|"d" */
-                    $bar = "c";
+                    $foo = rand(0, 1) ? "a" : "b";
+                    $bar = rand(0, 1) ? "c" : "d";
                     $baz = $foo . $bar;
                     foobar($baz);
                 ',
@@ -241,6 +263,18 @@ class BinaryOperationTest extends TestCase
                     }
 
                     foo(foo("-123") . 456);
+                ',
+            ],
+            'castToIntPreserveNarrowerIntType' => [
+                '<?php
+                    /**
+                     * @param positive-int $i
+                     * @return positive-int
+                     */
+                    function takesAnInt(int $i) {
+                        /** @psalm-suppress RedundantCast */
+                        return (int)$i;
+                    }
                 ',
             ],
             'concatenateFloatWithInt' => [
@@ -370,6 +404,18 @@ class BinaryOperationTest extends TestCase
                     $a++;',
                 'assertions' => [
                     '$a' => 'string',
+                ],
+            ],
+            'stringIncrementWithCheck' => [
+                '<?php
+                    /** @psalm-suppress StringIncrement */
+                    for($a = "a"; $a != "z"; $a++){
+                        if($a === "b"){
+                            echo "b reached";
+                        }
+                    }',
+                'assertions' => [
+                    '$a===' => 'non-empty-string',
                 ],
             ],
             'nullCoalescingAssignment' => [
@@ -507,6 +553,115 @@ class BinaryOperationTest extends TestCase
                     '$a' => 'float'
                 ],
             ],
+            'IntOverflowPlus' => [
+                '<?php
+                    $a = 2**62 - 1 + 2**62;
+                    $b = 2**62 + 2**62 - 1; // plus results in a float',
+                'assertions' => [
+                    '$a' => 'int',
+                    '$b' => 'float',
+                ],
+            ],
+            'IntOverflowPowSub' => [
+                '<?php
+                    $a = 2 ** 63;',
+                'assertions' => [
+                    '$a' => 'float'
+                ],
+            ],
+            'IntOverflowSub' => [
+                '<?php
+                    $a = (1 << 63) - (1 << 20);',
+                'assertions' => [
+                    '$a' => 'float'
+                ],
+            ],
+            'literalConcatCreatesLiteral' => [
+                '<?php
+                    /**
+                     * @param  literal-string $s1
+                     * @param  literal-string $s2
+                     * @return literal-string
+                     */
+                    function foo(string $s1, string $s2): string {
+                        return $s1 . $s2;
+                    }',
+            ],
+            'literalConcatCreatesLiteral2' => [
+                '<?php
+                    /**
+                     * @param  literal-string $s1
+                     * @return literal-string
+                     */
+                    function foo(string $s1): string {
+                        return $s1 . 2;
+                    }',
+            ],
+            'encapsedStringIncludingLiterals' => [
+                '<?php
+                    /**
+                     * @param  literal-string $s1
+                     * @param  literal-string $s2
+                     * @return literal-string
+                     */
+                    function foo(string $s1, string $s2): string {
+                        return "Hello $s1 $s2";
+                    }',
+            ],
+            'encapsedStringIncludingLiterals2' => [
+                '<?php
+                    /**
+                     * @param  literal-string $s1
+                     * @return literal-string
+                     */
+                    function foo(string $s1): string {
+                        $s2 = 2;
+                        return "Hello $s1 $s2";
+                    }',
+            ],
+            'literalIntConcatCreatesLiteral' => [
+                '<?php
+                    /**
+                     * @param  literal-string $s1
+                     * @param  literal-int $s2
+                     * @return literal-string
+                     */
+                    function foo(string $s1, int $s2): string {
+                        return $s1 . $s2;
+                    }',
+            ],
+            'literalIntConcatCreatesLiteral2' => [
+                '<?php
+                    /**
+                     * @param  literal-int $s1
+                     * @return literal-string
+                     */
+                    function foo(int $s1): string {
+                        return "foo" . $s1;
+                    }',
+            ],
+            'encapsedStringWithIntIncludingLiterals' => [
+                '<?php
+                    /**
+                     * @param  literal-int $s1
+                     * @param  literal-int $s2
+                     * @return literal-string
+                     */
+                    function foo(int $s1, int $s2): string {
+                        return "Hello $s1 $s2";
+                    }',
+            ],
+            'encapsedStringWithIntIncludingLiterals2' => [
+                '<?php
+                    /**
+                     * @param  literal-int $s1
+                     * @return literal-string
+                     */
+                    function foo(int $s1): string {
+                        $s2 = "foo";
+                        return "Hello $s1 $s2";
+                    }',
+            ],
         ];
     }
 
@@ -638,6 +793,28 @@ class BinaryOperationTest extends TestCase
                         }
                     }',
                     'error_message' => 'TypeDoesNotContainType',
+            ],
+            'literalConcatWithStringCreatesString' => [
+                '<?php
+                    /**
+                     * @param  literal-string $s2
+                     * @return literal-string
+                     */
+                    function foo(string $s1, string $s2): string {
+                        return $s1 . $s2;
+                    }',
+                'error_message' => 'LessSpecificReturnStatement',
+            ],
+            'encapsedConcatWithStringCreatesString' => [
+                '<?php
+                    /**
+                     * @param  literal-string $s2
+                     * @return literal-string
+                     */
+                    function foo(string $s1, string $s2): string {
+                        return "hello $s1 $s2";
+                    }',
+                'error_message' => 'LessSpecificReturnStatement',
             ],
         ];
     }

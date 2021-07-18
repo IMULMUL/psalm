@@ -2,12 +2,12 @@
 namespace Psalm\Internal\Analyzer\Statements\Expression;
 
 use PhpParser;
-use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
-use Psalm\Internal\Analyzer\StatementsAnalyzer;
-use Psalm\Internal\DataFlow\TaintSink;
-use Psalm\Internal\Codebase\TaintFlowGraph;
 use Psalm\CodeLocation;
 use Psalm\Context;
+use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
+use Psalm\Internal\Analyzer\StatementsAnalyzer;
+use Psalm\Internal\Codebase\TaintFlowGraph;
+use Psalm\Internal\DataFlow\TaintSink;
 use Psalm\Issue\ForbiddenCode;
 use Psalm\IssueBuffer;
 use Psalm\Storage\FunctionLikeParameter;
@@ -39,6 +39,7 @@ class PrintAnalyzer
 
             $print_param_sink->taints = [
                 Type\TaintKind::INPUT_HTML,
+                Type\TaintKind::INPUT_HAS_QUOTES,
                 Type\TaintKind::USER_SECRET,
                 Type\TaintKind::SYSTEM_SECRET
             ];

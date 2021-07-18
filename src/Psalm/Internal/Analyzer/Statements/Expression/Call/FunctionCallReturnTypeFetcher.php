@@ -3,28 +3,28 @@ namespace Psalm\Internal\Analyzer\Statements\Expression\Call;
 
 use PhpParser;
 use PhpParser\BuilderFactory;
-use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
-use Psalm\Internal\Analyzer\StatementsAnalyzer;
 use Psalm\CodeLocation;
 use Psalm\Context;
-use Psalm\Internal\FileManipulation\FileManipulationBuffer;
-use Psalm\Internal\DataFlow\TaintSource;
-use Psalm\Internal\DataFlow\DataFlowNode;
+use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
+use Psalm\Internal\Analyzer\StatementsAnalyzer;
 use Psalm\Internal\Codebase\TaintFlowGraph;
-use Psalm\Internal\Type\TypeExpander;
+use Psalm\Internal\DataFlow\DataFlowNode;
+use Psalm\Internal\DataFlow\TaintSource;
+use Psalm\Internal\FileManipulation\FileManipulationBuffer;
+use Psalm\Internal\Type\TemplateBound;
 use Psalm\Internal\Type\TemplateInferredTypeReplacer;
+use Psalm\Internal\Type\TemplateResult;
+use Psalm\Internal\Type\TypeExpander;
+use Psalm\Plugin\EventHandler\Event\AddRemoveTaintsEvent;
 use Psalm\Plugin\EventHandler\Event\AfterFunctionCallAnalysisEvent;
 use Psalm\Storage\FunctionLikeStorage;
 use Psalm\Type;
 use Psalm\Type\Atomic\TCallable;
-use function count;
-use function strtolower;
-use function strpos;
-use Psalm\Internal\Type\TemplateBound;
-use Psalm\Internal\Type\TemplateResult;
-use Psalm\Plugin\EventHandler\Event\AddRemoveTaintsEvent;
 
+use function count;
 use function explode;
+use function strpos;
+use function strtolower;
 
 /**
  * @internal
@@ -54,7 +54,7 @@ class FunctionCallReturnTypeFetcher
             $stmt_type = $codebase->functions->return_type_provider->getReturnType(
                 $statements_analyzer,
                 $function_id,
-                $stmt->args,
+                $stmt,
                 $context,
                 new CodeLocation($statements_analyzer->getSource(), $function_name)
             );
@@ -64,24 +64,30 @@ class FunctionCallReturnTypeFetcher
             if (!$in_call_map || $is_stubbed) {
                 if ($function_storage && $function_storage->template_types) {
                     foreach ($function_storage->template_types as $template_name => $_) {
-                        if (!isset($template_result->upper_bounds[$template_name])) {
+                        if (!isset($template_result->lower_bounds[$template_name])) {
                             if ($template_name === 'TFunctionArgCount') {
-                                $template_result->upper_bounds[$template_name] = [
-                                    'fn-' . $function_id => new TemplateBound(
-                                        Type::getInt(false, count($stmt->args))
-                                    )
+                                $template_result->lower_bounds[$template_name] = [
+                                    'fn-' . $function_id => [
+                                        new TemplateBound(
+                                            Type::getInt(false, count($stmt->args))
+                                        )
+                                    ]
                                 ];
                             } elseif ($template_name === 'TPhpMajorVersion') {
-                                $template_result->upper_bounds[$template_name] = [
-                                    'fn-' . $function_id => new TemplateBound(
-                                        Type::getInt(false, $codebase->php_major_version)
-                                    )
+                                $template_result->lower_bounds[$template_name] = [
+                                    'fn-' . $function_id => [
+                                            new TemplateBound(
+                                                Type::getInt(false, $codebase->php_major_version)
+                                            )
+                                    ]
                                 ];
                             } else {
-                                $template_result->upper_bounds[$template_name] = [
-                                    'fn-' . $function_id => new TemplateBound(
-                                        Type::getEmpty()
-                                    )
+                                $template_result->lower_bounds[$template_name] = [
+                                    'fn-' . $function_id => [
+                                        new TemplateBound(
+                                            Type::getEmpty()
+                                        )
+                                    ]
                                 ];
                             }
                         }
@@ -99,7 +105,7 @@ class FunctionCallReturnTypeFetcher
                     if ($function_storage && $function_storage->return_type) {
                         $return_type = clone $function_storage->return_type;
 
-                        if ($template_result->upper_bounds && $function_storage->template_types) {
+                        if ($template_result->lower_bounds && $function_storage->template_types) {
                             $return_type = TypeExpander::expandUnion(
                                 $codebase,
                                 $return_type,
@@ -320,7 +326,7 @@ class FunctionCallReturnTypeFetcher
                                 }
 
                                 if ($atomic_types['array'] instanceof Type\Atomic\TKeyedArray
-                                    && $atomic_types['array']->sealed
+                                    && $atomic_types['array']->isNonEmpty()
                                 ) {
                                     return new Type\Union([
                                         new Type\Atomic\TLiteralInt(count($atomic_types['array']->properties))
@@ -588,6 +594,7 @@ class FunctionCallReturnTypeFetcher
 
                         if (self::simpleExclusion($pattern, $first_arg_value[0])) {
                             $removed_taints[] = 'html';
+                            $removed_taints[] = 'has_quotes';
                             $removed_taints[] = 'sql';
                         }
                     }

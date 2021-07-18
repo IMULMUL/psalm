@@ -1,35 +1,36 @@
 <?php
 namespace Psalm\Internal\Type;
 
-use function array_filter;
-use function count;
-use function get_class;
-use function is_string;
-use Psalm\Codebase;
 use Psalm\CodeLocation;
-use Psalm\Internal\Analyzer\StatementsAnalyzer;
+use Psalm\Codebase;
 use Psalm\Internal\Analyzer\Statements\Expression\Fetch\VariableFetchAnalyzer;
+use Psalm\Internal\Analyzer\StatementsAnalyzer;
 use Psalm\Internal\Analyzer\TraitAnalyzer;
 use Psalm\Internal\Type\Comparator\AtomicTypeComparator;
 use Psalm\Internal\Type\Comparator\UnionTypeComparator;
 use Psalm\Issue\DocblockTypeContradiction;
+use Psalm\Issue\InvalidDocblock;
 use Psalm\Issue\TypeDoesNotContainNull;
 use Psalm\Issue\TypeDoesNotContainType;
 use Psalm\IssueBuffer;
 use Psalm\Type;
 use Psalm\Type\Atomic;
-use Psalm\Type\Union;
 use Psalm\Type\Atomic\TClassString;
 use Psalm\Type\Atomic\TInt;
 use Psalm\Type\Atomic\TMixed;
 use Psalm\Type\Atomic\TNamedObject;
 use Psalm\Type\Atomic\TString;
 use Psalm\Type\Atomic\TTemplateParam;
-use function strpos;
-use function substr;
-use Psalm\Issue\InvalidDocblock;
+use Psalm\Type\Union;
+
 use function array_intersect_key;
 use function array_merge;
+use function count;
+use function explode;
+use function get_class;
+use function is_string;
+use function strpos;
+use function substr;
 
 class AssertionReconciler extends \Psalm\Type\Reconciler
 {
@@ -1207,6 +1208,51 @@ class AssertionReconciler extends \Psalm\Type\Reconciler
                         );
                     }
                 }
+            }
+        } elseif ($scalar_type === 'enum') {
+            list($fq_enum_name, $case_name) = explode('::', $value);
+
+            if ($existing_var_type->hasMixed()) {
+                if ($is_loose_equality) {
+                    return $existing_var_type;
+                }
+
+                return new Type\Union([new Type\Atomic\TEnumCase($fq_enum_name, $case_name)]);
+            }
+
+            $can_be_equal = false;
+            $did_remove_type = false;
+
+            foreach ($existing_var_atomic_types as $atomic_key => $atomic_type) {
+                if (get_class($atomic_type) === Type\Atomic\TNamedObject::class
+                    && $atomic_type->value === $fq_enum_name
+                ) {
+                    $can_be_equal = true;
+                    $did_remove_type = true;
+                    $existing_var_type->removeType($atomic_key);
+                    $existing_var_type->addType(new Type\Atomic\TEnumCase($fq_enum_name, $case_name));
+                } elseif ($atomic_key !== $assertion) {
+                    $existing_var_type->removeType($atomic_key);
+                    $did_remove_type = true;
+                } else {
+                    $can_be_equal = true;
+                }
+            }
+
+            if ($var_id
+                && $code_location
+                && (!$can_be_equal || (!$did_remove_type && count($existing_var_atomic_types) === 1))
+            ) {
+                self::triggerIssueForImpossible(
+                    $existing_var_type,
+                    $old_var_type_string,
+                    $var_id,
+                    $assertion,
+                    $can_be_equal,
+                    $negated,
+                    $code_location,
+                    $suppressed_issues
+                );
             }
         }
 

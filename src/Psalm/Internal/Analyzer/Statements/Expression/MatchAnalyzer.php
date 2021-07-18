@@ -2,11 +2,11 @@
 namespace Psalm\Internal\Analyzer\Statements\Expression;
 
 use PhpParser;
+use Psalm\Context;
 use Psalm\Internal\Algebra\FormulaGenerator;
 use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
 use Psalm\Internal\Analyzer\StatementsAnalyzer;
 use Psalm\Issue\UnhandledMatchCondition;
-use Psalm\Context;
 use Psalm\Node\Expr\BinaryOp\VirtualIdentical;
 use Psalm\Node\Expr\VirtualArray;
 use Psalm\Node\Expr\VirtualArrayItem;
@@ -20,12 +20,12 @@ use Psalm\Node\Name\VirtualFullyQualified;
 use Psalm\Node\VirtualArg;
 use Psalm\Type;
 
-use function substr;
+use function array_map;
 use function array_reverse;
 use function array_shift;
-use function in_array;
 use function count;
-use function array_map;
+use function in_array;
+use function substr;
 
 class MatchAnalyzer
 {
@@ -248,7 +248,17 @@ class MatchAnalyzer
                 );
 
                 if (isset($vars_in_scope_reconciled[$switch_var_id])) {
-                    if ($vars_in_scope_reconciled[$switch_var_id]->hasLiteralValue()) {
+                    $array_literal_types = \array_filter(
+                        $vars_in_scope_reconciled[$switch_var_id]->getAtomicTypes(),
+                        function ($type) {
+                            return $type instanceof Type\Atomic\TLiteralInt
+                                || $type instanceof Type\Atomic\TLiteralString
+                                || $type instanceof Type\Atomic\TLiteralFloat
+                                || $type instanceof Type\Atomic\TEnumCase;
+                        }
+                    );
+
+                    if ($array_literal_types) {
                         if (\Psalm\IssueBuffer::accepts(
                             new UnhandledMatchCondition(
                                 'This match expression is not exhaustive - consider values '

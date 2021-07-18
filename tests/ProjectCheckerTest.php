@@ -1,25 +1,26 @@
 <?php
 namespace Psalm\Tests;
 
+use Psalm\Config;
+use Psalm\Internal\IncludeCollector;
+use Psalm\Internal\Provider\FakeFileProvider;
+use Psalm\Internal\RuntimeCaches;
+use Psalm\Plugin\EventHandler\AfterCodebasePopulatedInterface;
 use Psalm\Plugin\EventHandler\Event\AfterCodebasePopulatedEvent;
+use Psalm\Tests\Internal\Provider;
+use Psalm\Tests\Progress\EchoProgress;
+
 use function define;
 use function defined;
-use const DIRECTORY_SEPARATOR;
 use function get_class;
 use function getcwd;
 use function microtime;
 use function ob_end_clean;
 use function ob_get_clean;
 use function ob_start;
-use Psalm\Codebase;
-use Psalm\Config;
-use Psalm\Internal\ExecutionEnvironment\BuildInfoCollector;
-use Psalm\Internal\IncludeCollector;
-use Psalm\Internal\RuntimeCaches;
-use Psalm\Plugin\EventHandler\AfterCodebasePopulatedInterface;
-use Psalm\Tests\Internal\Provider;
-use Psalm\Tests\Progress\EchoProgress;
 use function realpath;
+
+use const DIRECTORY_SEPARATOR;
 
 class ProjectCheckerTest extends TestCase
 {
@@ -34,7 +35,7 @@ class ProjectCheckerTest extends TestCase
         self::$config = new TestConfig();
 
         if (!defined('PSALM_VERSION')) {
-            define('PSALM_VERSION', '2.0.0');
+            define('PSALM_VERSION', '4.0.0');
         }
 
         if (!defined('PHP_PARSER_VERSION')) {
@@ -45,7 +46,7 @@ class ProjectCheckerTest extends TestCase
     public function setUp() : void
     {
         RuntimeCaches::clearAll();
-        $this->file_provider = new Provider\FakeFileProvider();
+        $this->file_provider = new FakeFileProvider();
     }
 
     private function getProjectAnalyzerWithConfig(Config $config): \Psalm\Internal\Analyzer\ProjectAnalyzer

@@ -8,23 +8,24 @@ use Psalm\Exception\IncorrectDocblockException;
 use Psalm\Internal\Analyzer\CommentAnalyzer;
 use Psalm\Internal\Scanner\FunctionDocblockComment;
 use Psalm\Internal\Scanner\ParsedDocblock;
-use function array_unique;
-use function trim;
-use function substr_count;
-use function strlen;
-use function preg_replace;
-use function str_replace;
-use function preg_match;
-use function count;
-use function reset;
-use function preg_split;
+
 use function array_shift;
+use function array_unique;
+use function count;
+use function explode;
 use function implode;
-use function substr;
+use function in_array;
+use function preg_match;
+use function preg_replace;
+use function preg_split;
+use function reset;
+use function str_replace;
+use function strlen;
 use function strpos;
 use function strtolower;
-use function in_array;
-use function explode;
+use function substr;
+use function substr_count;
+use function trim;
 
 class FunctionLikeDocblockParser
 {
@@ -40,6 +41,7 @@ class FunctionLikeDocblockParser
         $info = new FunctionDocblockComment();
 
         self::checkDuplicatedTags($parsed_docblock);
+        self::checkUnexpectedTags($parsed_docblock, $info, $comment);
 
         if (isset($parsed_docblock->combined_tags['return'])) {
             self::extractReturnType(
@@ -59,7 +61,7 @@ class FunctionLikeDocblockParser
 
                 if (count($line_parts) > 1) {
                     if (preg_match('/^&?(\.\.\.)?&?\$[A-Za-z0-9_]+,?$/', $line_parts[1])
-                        && $line_parts[0][0] !== '{'
+                        && ($line_parts[0] === '' || $line_parts[0][0] !== '{')
                     ) {
                         $line_parts[1] = str_replace('&', '', $line_parts[1]);
 
@@ -356,8 +358,9 @@ class FunctionLikeDocblockParser
             $info->inheritdoc = true;
         }
 
+        $templates = [];
         if (isset($parsed_docblock->combined_tags['template'])) {
-            foreach ($parsed_docblock->combined_tags['template'] as $template_line) {
+            foreach ($parsed_docblock->combined_tags['template'] as $offset => $template_line) {
                 $template_type = preg_split('/[\s]+/', preg_replace('@^[ \t]*\*@m', '', $template_line));
 
                 $template_name = array_shift($template_type);
@@ -366,18 +369,34 @@ class FunctionLikeDocblockParser
                     throw new IncorrectDocblockException('Empty @template tag');
                 }
 
+                $source_prefix = 'none';
+                if (isset($parsed_docblock->tags['psalm-template'][$offset])) {
+                    $source_prefix = 'psalm';
+                } elseif (isset($parsed_docblock->tags['phpstan-template'][$offset])) {
+                    $source_prefix = 'phpstan';
+                }
+
                 if (count($template_type) > 1
                     && in_array(strtolower($template_type[0]), ['as', 'super', 'of'], true)
                 ) {
                     $template_modifier = strtolower(array_shift($template_type));
-                    $info->templates[] = [
+                    $templates[$template_name][$source_prefix] = [
                         $template_name,
                         $template_modifier,
                         implode(' ', $template_type),
                         false
                     ];
                 } else {
-                    $info->templates[] = [$template_name, null, null, false];
+                    $templates[$template_name][$source_prefix] = [$template_name, null, null, false];
+                }
+            }
+        }
+
+        foreach ($templates as $template_entries) {
+            foreach (['psalm', 'phpstan', 'none'] as $source_prefix) {
+                if (isset($template_entries[$source_prefix])) {
+                    $info->templates[] = $template_entries[$source_prefix];
+                    break;
                 }
             }
         }
@@ -570,5 +589,29 @@ class FunctionLikeDocblockParser
         }
 
         return $names;
+    }
+
+    private static function checkUnexpectedTags(
+        ParsedDocblock $parsed_docblock,
+        FunctionDocblockComment $info,
+        PhpParser\Comment\Doc $comment
+    ): void {
+        if (isset($parsed_docblock->tags['psalm-import-type'])) {
+            foreach ($parsed_docblock->tags['psalm-import-type'] as $offset => $_) {
+                $info->unexpected_tags['psalm-import-type']['lines'][] = self::docblockLineNumber($comment, $offset);
+            }
+        }
+
+        if (isset($parsed_docblock->combined_tags['var'])) {
+            $info->unexpected_tags['var'] = ['lines' => [], 'suggested_replacement' => 'param'];
+            foreach ($parsed_docblock->combined_tags['var'] as $offset => $_) {
+                $info->unexpected_tags['var']['lines'][] = self::docblockLineNumber($comment, $offset);
+            }
+        }
+    }
+
+    private static function docblockLineNumber(PhpParser\Comment\Doc $comment, int $offset): int
+    {
+        return $comment->getStartLine() + substr_count($comment->getText(), "\n", 0, $offset);
     }
 }

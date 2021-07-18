@@ -2,54 +2,54 @@
 namespace Psalm\Internal\Analyzer\Statements\Expression\Call;
 
 use PhpParser;
+use Psalm\CodeLocation;
 use Psalm\Codebase;
+use Psalm\Context;
 use Psalm\Internal\Analyzer\ClassLikeAnalyzer;
+use Psalm\Internal\Analyzer\ClassLikeNameOptions;
 use Psalm\Internal\Analyzer\MethodAnalyzer;
 use Psalm\Internal\Analyzer\Statements\Block\ForeachAnalyzer;
 use Psalm\Internal\Analyzer\Statements\Expression\CallAnalyzer;
-use Psalm\Internal\Analyzer\Statements\Expression\ExpressionIdentifier;
 use Psalm\Internal\Analyzer\Statements\Expression\CastAnalyzer;
+use Psalm\Internal\Analyzer\Statements\Expression\ExpressionIdentifier;
 use Psalm\Internal\Analyzer\StatementsAnalyzer;
-use Psalm\Internal\Type\Comparator\CallableTypeComparator;
-use Psalm\Internal\Type\Comparator\UnionTypeComparator;
-use Psalm\Internal\DataFlow\DataFlowNode;
 use Psalm\Internal\Codebase\TaintFlowGraph;
 use Psalm\Internal\Codebase\VariableUseGraph;
+use Psalm\Internal\DataFlow\DataFlowNode;
 use Psalm\Internal\MethodIdentifier;
-use Psalm\Internal\Scanner\UnresolvedConstantComponent;
+use Psalm\Internal\Type\Comparator\CallableTypeComparator;
+use Psalm\Internal\Type\Comparator\UnionTypeComparator;
 use Psalm\Internal\Type\TemplateBound;
 use Psalm\Internal\Type\TemplateResult;
 use Psalm\Internal\Type\TemplateStandinTypeReplacer;
-use Psalm\CodeLocation;
-use Psalm\Context;
+use Psalm\Issue\ArgumentTypeCoercion;
 use Psalm\Issue\ImplicitToStringCast;
 use Psalm\Issue\InvalidArgument;
-use Psalm\Issue\InvalidScalarArgument;
 use Psalm\Issue\InvalidLiteralArgument;
+use Psalm\Issue\InvalidScalarArgument;
 use Psalm\Issue\MixedArgument;
 use Psalm\Issue\MixedArgumentTypeCoercion;
+use Psalm\Issue\NamedArgumentNotAllowed;
 use Psalm\Issue\NoValue;
 use Psalm\Issue\NullArgument;
 use Psalm\Issue\PossiblyFalseArgument;
 use Psalm\Issue\PossiblyInvalidArgument;
 use Psalm\Issue\PossiblyNullArgument;
-use Psalm\Issue\ArgumentTypeCoercion;
-use Psalm\Issue\NamedArgumentNotAllowed;
 use Psalm\IssueBuffer;
 use Psalm\Plugin\EventHandler\Event\AddRemoveTaintsEvent;
 use Psalm\Storage\FunctionLikeParameter;
 use Psalm\Type;
 use Psalm\Type\Atomic\TArray;
-use Psalm\Type\Atomic\TClassString;
 use Psalm\Type\Atomic\TCallable;
+use Psalm\Type\Atomic\TClassString;
 use Psalm\Type\Atomic\TList;
 
-use function strtolower;
-use function strpos;
-use function explode;
-use function count;
 use function array_merge;
+use function count;
+use function explode;
 use function reset;
+use function strpos;
+use function strtolower;
 
 /**
  * @internal
@@ -141,31 +141,33 @@ class ArgumentAnalyzer
         ) {
             $values = \preg_split('//u', $arg_value_type->getSingleStringLiteral()->value, -1, \PREG_SPLIT_NO_EMPTY);
 
-            $prev_ord = 0;
+            if ($values !== false) {
+                $prev_ord = 0;
 
-            $gt_count = 0;
+                $gt_count = 0;
 
-            foreach ($values as $value) {
-                $ord = \ord($value);
+                foreach ($values as $value) {
+                    $ord = \ord($value);
 
-                if ($ord > $prev_ord) {
-                    $gt_count++;
+                    if ($ord > $prev_ord) {
+                        $gt_count++;
+                    }
+
+                    $prev_ord = $ord;
                 }
 
-                $prev_ord = $ord;
-            }
-
-            if (count($values) < 12 || ($gt_count / count($values)) < 0.8) {
-                if (IssueBuffer::accepts(
-                    new InvalidLiteralArgument(
-                        'Argument ' . ($argument_offset + 1) . ' of ' . $cased_method_id
-                            . ' expects a non-literal value, ' . $arg_value_type->getId() . ' provided',
-                        new CodeLocation($statements_analyzer->getSource(), $arg->value),
-                        $cased_method_id
-                    ),
-                    $statements_analyzer->getSuppressedIssues()
-                )) {
-                    // fall through
+                if (count($values) < 12 || ($gt_count / count($values)) < 0.8) {
+                    if (IssueBuffer::accepts(
+                        new InvalidLiteralArgument(
+                            'Argument ' . ($argument_offset + 1) . ' of ' . $cased_method_id
+                                . ' expects a non-literal value, ' . $arg_value_type->getId() . ' provided',
+                            new CodeLocation($statements_analyzer->getSource(), $arg->value),
+                            $cased_method_id
+                        ),
+                        $statements_analyzer->getSuppressedIssues()
+                    )) {
+                        // fall through
+                    }
                 }
             }
         }
@@ -275,7 +277,7 @@ class ArgumentAnalyzer
             $readonly_template_result = new TemplateResult($class_generic_params, []);
 
             // This flag ensures that the template results will never be written to
-            // It also supercedes the `$add_upper_bounds` flag so that closure params
+            // It also supercedes the `$add_lower_bounds` flag so that closure params
             // don’t get overwritten
             $readonly_template_result->readonly = true;
 
@@ -288,7 +290,8 @@ class ArgumentAnalyzer
                 $statements_analyzer,
                 $arg_value_type,
                 $argument_offset,
-                $context->self ?: 'fn-' . $context->calling_function_id
+                $context->self,
+                $context->calling_function_id ?: $context->calling_method_id
             );
 
             $arg_type = TemplateStandinTypeReplacer::replace(
@@ -298,7 +301,8 @@ class ArgumentAnalyzer
                 $statements_analyzer,
                 $arg_value_type,
                 $argument_offset,
-                $context->self ?: 'fn-' . $context->calling_function_id
+                $context->self,
+                $context->calling_function_id ?: $context->calling_method_id
             );
         }
 
@@ -354,26 +358,28 @@ class ArgumentAnalyzer
 
             foreach ($bindable_template_params as $template_type) {
                 if (!isset(
-                    $template_result->upper_bounds
+                    $template_result->lower_bounds
                         [$template_type->param_name]
                         [$template_type->defining_class]
                 )) {
                     if (isset(
-                        $template_result->lower_bounds
+                        $template_result->upper_bounds
                             [$template_type->param_name]
                             [$template_type->defining_class]
                     )) {
-                        $template_result->upper_bounds[$template_type->param_name][$template_type->defining_class]
-                            = new TemplateBound(
-                                clone $template_result->lower_bounds
+                        $template_result->lower_bounds[$template_type->param_name][$template_type->defining_class] = [
+                            new TemplateBound(
+                                clone $template_result->upper_bounds
                                     [$template_type->param_name]
                                     [$template_type->defining_class]->type
-                            );
+                            )
+                        ];
                     } else {
-                        $template_result->upper_bounds[$template_type->param_name][$template_type->defining_class]
-                            = new TemplateBound(
+                        $template_result->lower_bounds[$template_type->param_name][$template_type->defining_class] = [
+                            new TemplateBound(
                                 clone $template_type->as
-                            );
+                            )
+                        ];
                     }
                 }
             }
@@ -451,7 +457,7 @@ class ArgumentAnalyzer
             if ($arg_type->hasArray()) {
                 /**
                  * @psalm-suppress PossiblyUndefinedStringArrayOffset
-                 * @var Type\Atomic\TArray|Type\Atomic\TList|Type\Atomic\TKeyedArray
+                 * @var Type\Atomic\TArray|Type\Atomic\TList|Type\Atomic\TKeyedArray|Type\Atomic\TClassStringMap
                  */
                 $unpacked_atomic_array = $arg_type->getAtomicTypes()['array'];
                 $arg_key_allowed = true;
@@ -489,6 +495,8 @@ class ArgumentAnalyzer
                     }
                 } elseif ($unpacked_atomic_array instanceof Type\Atomic\TList) {
                     $arg_type = $unpacked_atomic_array->type_param;
+                } elseif ($unpacked_atomic_array instanceof Type\Atomic\TClassStringMap) {
+                    $arg_type = Type::getMixed();
                 } else {
                     if (!$allow_named_args && !$unpacked_atomic_array->type_params[0]->isInt()) {
                         $arg_key_allowed = false;
@@ -645,7 +653,8 @@ class ArgumentAnalyzer
     }
 
     /**
-     * @param Type\Atomic\TKeyedArray|Type\Atomic\TArray|Type\Atomic\TList $unpacked_atomic_array
+     * @param Type\Atomic\TKeyedArray|Type\Atomic\TArray|Type\Atomic\TList|Type\Atomic\TClassStringMap
+     *        $unpacked_atomic_array
      * @return  null|false
      */
     public static function verifyType(
@@ -827,17 +836,22 @@ class ArgumentAnalyzer
             $param_type->possibly_undefined = true;
         }
 
-        if ($param_type->hasCallableType()
-            && $param_type->isSingle()
-            && $input_type->isSingleStringLiteral()
-            && !\Psalm\Internal\Codebase\InternalCallMapHandler::inCallMap($input_type->getSingleStringLiteral()->value)
-        ) {
+        if ($param_type->hasCallableType() && $param_type->isSingle()) {
+            // we do this replacement early because later we don't have access to the
+            // $statements_analyzer, which is necessary to understand string function names
             foreach ($input_type->getAtomicTypes() as $key => $atomic_type) {
+                if (!$atomic_type instanceof Type\Atomic\TLiteralString
+                    || \Psalm\Internal\Codebase\InternalCallMapHandler::inCallMap($atomic_type->value)
+                ) {
+                    continue;
+                }
+
                 $candidate_callable = CallableTypeComparator::getCallableFromAtomic(
                     $codebase,
                     $atomic_type,
                     null,
-                    $statements_analyzer
+                    $statements_analyzer,
+                    true
                 );
 
                 if ($candidate_callable) {
@@ -921,7 +935,9 @@ class ArgumentAnalyzer
                     $context->calling_method_id,
                     null,
                     $statements_analyzer,
-                    $statements_analyzer->getFilePath()
+                    $statements_analyzer->getFilePath(),
+                    true,
+                    $context->insideUse()
                 );
             }
         }
@@ -1099,22 +1115,40 @@ class ArgumentAnalyzer
             }
         }
 
-        if ($input_type->isFalsable()
-            && !$param_type->hasBool()
-            && !$param_type->hasScalar()
-            && !$input_type->ignore_falsable_issues
-            && $cased_method_id !== 'echo'
+        if (!$param_type->isFalsable() &&
+            !$param_type->hasBool() &&
+            !$param_type->hasScalar() &&
+            $cased_method_id !== 'echo' &&
+            $cased_method_id !== 'print'
         ) {
-            if (IssueBuffer::accepts(
-                new PossiblyFalseArgument(
-                    'Argument ' . ($argument_offset + 1) . $method_identifier . ' cannot be false, possibly ' .
-                        'false value provided',
-                    $arg_location,
-                    $cased_method_id
-                ),
-                $statements_analyzer->getSuppressedIssues()
-            )) {
-                // fall through
+            if ($input_type->isFalse()) {
+                if (IssueBuffer::accepts(
+                    new InvalidArgument(
+                        'Argument ' . ($argument_offset + 1) . $method_identifier . ' cannot be false, ' .
+                        $param_type->getId() . ' value provided',
+                        $arg_location,
+                        $cased_method_id
+                    ),
+                    $statements_analyzer->getSuppressedIssues()
+                )) {
+                    // fall through
+                }
+
+                return null;
+            }
+
+            if ($input_type->isFalsable() && !$input_type->ignore_falsable_issues) {
+                if (IssueBuffer::accepts(
+                    new PossiblyFalseArgument(
+                        'Argument ' . ($argument_offset + 1) . $method_identifier . ' cannot be false, possibly ' .
+                        $param_type->getId() . ' value provided',
+                        $arg_location,
+                        $cased_method_id
+                    ),
+                    $statements_analyzer->getSuppressedIssues()
+                )) {
+                    // fall through
+                }
             }
         }
 
@@ -1164,7 +1198,8 @@ class ArgumentAnalyzer
                     $arg_location,
                     $context->self,
                     $context->calling_method_id,
-                    $statements_analyzer->getSuppressedIssues()
+                    $statements_analyzer->getSuppressedIssues(),
+                    new ClassLikeNameOptions(true)
                 ) === false
                 ) {
                     return;
@@ -1182,7 +1217,8 @@ class ArgumentAnalyzer
                                     $arg_location,
                                     $context->self,
                                     $context->calling_method_id,
-                                    $statements_analyzer->getSuppressedIssues()
+                                    $statements_analyzer->getSuppressedIssues(),
+                                    new ClassLikeNameOptions(true)
                                 ) === false
                                 ) {
                                     return;
@@ -1258,7 +1294,8 @@ class ArgumentAnalyzer
                                     $arg_location,
                                     $context->self,
                                     $context->calling_method_id,
-                                    $statements_analyzer->getSuppressedIssues()
+                                    $statements_analyzer->getSuppressedIssues(),
+                                    new ClassLikeNameOptions(true)
                                 ) === false
                                 ) {
                                     return;
@@ -1274,7 +1311,7 @@ class ArgumentAnalyzer
                                     '__call'
                                 );
 
-                                if (!$codebase->classOrInterfaceExists($callable_fq_class_name)) {
+                                if (!$codebase->classOrInterfaceOrEnumExists($callable_fq_class_name)) {
                                     return;
                                 }
 
@@ -1318,7 +1355,8 @@ class ArgumentAnalyzer
     }
 
     /**
-     * @param Type\Atomic\TKeyedArray|Type\Atomic\TArray|Type\Atomic\TList $unpacked_atomic_array
+     * @param Type\Atomic\TKeyedArray|Type\Atomic\TArray|Type\Atomic\TList|Type\Atomic\TClassStringMap
+     *        $unpacked_atomic_array
      */
     private static function coerceValueAfterGatekeeperArgument(
         StatementsAnalyzer $statements_analyzer,
@@ -1377,15 +1415,17 @@ class ArgumentAnalyzer
             }
 
             if ($input_type->getId() === $param_type->getId()) {
-                if (!$was_cloned) {
-                    $was_cloned = true;
-                    $input_type = clone $input_type;
-                }
+                if ($input_type->from_docblock) {
+                    if (!$was_cloned) {
+                        $was_cloned = true;
+                        $input_type = clone $input_type;
+                    }
 
-                $input_type->from_docblock = false;
+                    $input_type->from_docblock = false;
 
-                foreach ($input_type->getAtomicTypes() as $atomic_type) {
-                    $atomic_type->from_docblock = false;
+                    foreach ($input_type->getAtomicTypes() as $atomic_type) {
+                        $atomic_type->from_docblock = false;
+                    }
                 }
             } elseif ($input_type->hasMixed() && $signature_param_type) {
                 $was_cloned = true;

@@ -4,14 +4,15 @@ namespace Psalm\Internal\Type\Comparator;
 
 use Psalm\Codebase;
 use Psalm\Type;
-use Psalm\Type\Atomic\TKeyedArray;
 use Psalm\Type\Atomic\TArray;
 use Psalm\Type\Atomic\TClassStringMap;
+use Psalm\Type\Atomic\TKeyedArray;
 use Psalm\Type\Atomic\TList;
 use Psalm\Type\Atomic\TLiteralInt;
 use Psalm\Type\Atomic\TLiteralString;
 use Psalm\Type\Atomic\TNonEmptyArray;
 use Psalm\Type\Atomic\TNonEmptyList;
+
 use function array_map;
 use function range;
 
@@ -32,6 +33,24 @@ class ArrayTypeComparator
         ?TypeComparisonResult $atomic_comparison_result
     ) : bool {
         $all_types_contain = true;
+
+        $is_empty_array = $input_type_part->equals(
+            new Type\Atomic\TArray([
+                new Type\Union([new Type\Atomic\TEmpty()]),
+                new Type\Union([new Type\Atomic\TEmpty()])
+            ]),
+            false
+        );
+
+        if ($is_empty_array
+            && (($container_type_part instanceof Type\Atomic\TArray
+                    && !$container_type_part instanceof Type\Atomic\TNonEmptyArray)
+                || ($container_type_part instanceof Type\Atomic\TKeyedArray
+                    && !$container_type_part->isNonEmpty())
+            )
+        ) {
+            return true;
+        }
 
         if ($container_type_part instanceof TKeyedArray
             && $input_type_part instanceof TArray

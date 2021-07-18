@@ -1,14 +1,17 @@
 <?php
 namespace Psalm\Tests\FileUpdates;
 
-use function array_keys;
-use const DIRECTORY_SEPARATOR;
-use function getcwd;
 use Psalm\Internal\Analyzer\ProjectAnalyzer;
+use Psalm\Internal\Provider\FakeFileProvider;
 use Psalm\Internal\Provider\Providers;
 use Psalm\Tests\Internal\Provider;
 use Psalm\Tests\TestConfig;
+
+use function array_keys;
+use function getcwd;
 use function strpos;
+
+use const DIRECTORY_SEPARATOR;
 
 class AnalyzedMethodTest extends \Psalm\Tests\TestCase
 {
@@ -16,7 +19,7 @@ class AnalyzedMethodTest extends \Psalm\Tests\TestCase
     {
         parent::setUp();
 
-        $this->file_provider = new \Psalm\Tests\Internal\Provider\FakeFileProvider();
+        $this->file_provider = new FakeFileProvider();
 
         $config = new TestConfig();
 

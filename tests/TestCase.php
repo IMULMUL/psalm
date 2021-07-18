@@ -1,20 +1,23 @@
 <?php
 namespace Psalm\Tests;
 
-use function define;
-use function defined;
-use const DIRECTORY_SEPARATOR;
-use function getcwd;
-use function ini_set;
-use function method_exists;
 use PHPUnit\Framework\TestCase as BaseTestCase;
 use Psalm\Config;
 use Psalm\Internal\Analyzer\FileAnalyzer;
 use Psalm\Internal\Analyzer\ProjectAnalyzer;
+use Psalm\Internal\Provider\FakeFileProvider;
 use Psalm\Internal\Provider\Providers;
 use Psalm\Internal\RuntimeCaches;
 use Psalm\Tests\Internal\Provider;
 use RuntimeException;
+
+use function define;
+use function defined;
+use function getcwd;
+use function ini_set;
+use function method_exists;
+
+use const DIRECTORY_SEPARATOR;
 
 class TestCase extends BaseTestCase
 {
@@ -24,15 +27,18 @@ class TestCase extends BaseTestCase
     /** @var ProjectAnalyzer */
     protected $project_analyzer;
 
-    /** @var Provider\FakeFileProvider */
+    /** @var FakeFileProvider */
     protected $file_provider;
+
+    /** @var Config */
+    protected $testConfig;
 
     public static function setUpBeforeClass() : void
     {
         ini_set('memory_limit', '-1');
 
         if (!defined('PSALM_VERSION')) {
-            define('PSALM_VERSION', '2.0.0');
+            define('PSALM_VERSION', '4.0.0');
         }
 
         if (!defined('PHP_PARSER_VERSION')) {
@@ -54,9 +60,9 @@ class TestCase extends BaseTestCase
 
         RuntimeCaches::clearAll();
 
-        $this->file_provider = new \Psalm\Tests\Internal\Provider\FakeFileProvider();
+        $this->file_provider = new FakeFileProvider();
 
-        $config = $this->makeConfig();
+        $this->testConfig = $this->makeConfig();
 
         $providers = new Providers(
             $this->file_provider,
@@ -64,7 +70,7 @@ class TestCase extends BaseTestCase
         );
 
         $this->project_analyzer = new ProjectAnalyzer(
-            $config,
+            $this->testConfig,
             $providers
         );
 
@@ -73,6 +79,7 @@ class TestCase extends BaseTestCase
 
     public function tearDown() : void
     {
+        unset($this->project_analyzer, $this->file_provider, $this->testConfig);
         RuntimeCaches::clearAll();
     }
 

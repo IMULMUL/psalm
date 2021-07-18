@@ -1,9 +1,10 @@
 <?php
 namespace Psalm\Tests\Template;
 
-use const DIRECTORY_SEPARATOR;
 use Psalm\Tests\TestCase;
 use Psalm\Tests\Traits;
+
+use const DIRECTORY_SEPARATOR;
 
 class ClassTemplateExtendsTest extends TestCase
 {
@@ -3238,6 +3239,7 @@ class ClassTemplateExtendsTest extends TestCase
                      * @implements I<int>
                      */
                     class XWithChangedArgumentName implements I {
+                        /** @psalm-suppress ParamNameMismatch */
                         public function i($changedArgumentName): void {
                             echo sprintf("%d", $changedArgumentName);
                         }

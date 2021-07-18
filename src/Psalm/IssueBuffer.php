@@ -5,6 +5,7 @@ use Psalm\Internal\Analyzer\IssueData;
 use Psalm\Internal\Analyzer\ProjectAnalyzer;
 use Psalm\Internal\ExecutionEnvironment\BuildInfoCollector;
 use Psalm\Issue\CodeIssue;
+use Psalm\Issue\ConfigIssue;
 use Psalm\Issue\UnusedPsalmSuppress;
 use Psalm\Plugin\EventHandler\Event\AfterAnalysisEvent;
 use Psalm\Report\CheckstyleReport;
@@ -47,6 +48,7 @@ use function sha1;
 use function sprintf;
 use function str_repeat;
 use function str_replace;
+use function trim;
 use function usort;
 
 use const DEBUG_BACKTRACE_IGNORE_ARGS;
@@ -140,7 +142,7 @@ class IssueBuffer
         $issue_type = array_pop($fqcn_parts);
         $file_path = $e->getFilePath();
 
-        if (!$config->reportIssueInFile($issue_type, $file_path)) {
+        if (!$e instanceof ConfigIssue && !$config->reportIssueInFile($issue_type, $file_path)) {
             return true;
         }
 
@@ -459,8 +461,15 @@ class IssueBuffer
 
         $codebase = $project_analyzer->getCodebase();
 
+        foreach ($codebase->config->config_issues as $issue) {
+            if (self::accepts($issue)) {
+                // fall through
+            }
+        }
+
         $error_count = 0;
         $info_count = 0;
+
 
         $issues_data = [];
 
@@ -510,7 +519,7 @@ class IssueBuffer
                         if (isset($issue_baseline[$file][$type]) && $issue_baseline[$file][$type]['o'] > 0) {
                             if ($issue_baseline[$file][$type]['o'] === count($issue_baseline[$file][$type]['s'])) {
                                 $position = array_search(
-                                    $issue_data->selected_text,
+                                    trim($issue_data->selected_text),
                                     $issue_baseline[$file][$type]['s'],
                                     true
                                 );

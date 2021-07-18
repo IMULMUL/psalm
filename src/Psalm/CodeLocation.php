@@ -1,22 +1,24 @@
 <?php
 namespace Psalm;
 
+use PhpParser;
+use Psalm\Internal\Analyzer\CommentAnalyzer;
+
 use function explode;
 use function max;
+use function mb_strcut;
 use function min;
-use PhpParser;
 use function preg_match;
-use const PREG_OFFSET_CAPTURE;
 use function preg_quote;
 use function preg_replace;
-use Psalm\Internal\Analyzer\CommentAnalyzer;
 use function str_replace;
 use function strlen;
 use function strpos;
 use function strrpos;
 use function substr_count;
-use function mb_strcut;
 use function trim;
+
+use const PREG_OFFSET_CAPTURE;
 
 class CodeLocation
 {
@@ -75,9 +77,6 @@ class CodeLocation
     public $docblock_start;
 
     /** @var int|null */
-    public $docblock_end;
-
-    /** @var int|null */
     private $docblock_start_line_number;
 
     /** @var int|null */
@@ -123,7 +122,6 @@ class CodeLocation
         $doc_comment = $stmt->getDocComment();
 
         $this->docblock_start = $doc_comment ? $doc_comment->getStartFilePos() : null;
-        $this->docblock_end = $doc_comment ? $this->file_start : null;
         $this->docblock_start_line_number = $doc_comment ? $doc_comment->getStartLine() : null;
 
         $this->preview_start = $this->docblock_start ?: $this->file_start;

@@ -1059,6 +1059,49 @@ class TypeAlgebraTest extends \Psalm\Tests\TestCase
                         return !$value ? "foo" : "bar";
                     }'
             ],
+            'dependentTypeUsedAfterCall' => [
+                '<?php
+                    function a(string $_b): void {}
+
+                    function foo(?string $c): string {
+                        $iftrue = $c !== null;
+
+                        if ($c !== null) {
+                            a($c);
+                        }
+
+                        if ($iftrue) {
+                            return $c;
+                        }
+
+                        return "";
+                    }'
+            ],
+            'notNullAfterSuccessfulNullsafeMethodCall' => [
+                '<?php
+                    interface X {
+                        public function a(): bool;
+                        public function b(): string;
+                    }
+
+                    function foo(?X $x): void {
+                        if ($x?->a()) {
+                            echo $x->b();
+                        }
+                    }',
+                [],
+                [],
+                '8.1',
+            ],
+            'narrowedTypeAfterIdenticalCheckWithOtherType' => [
+                '<?php
+                    function a(int $a, ?int $b = null): void
+                    {
+                        if ($a === $b) {
+                            throw new InvalidArgumentException(sprintf("a can not be the same as b (b: %s).", $b));
+                        }
+                    }'
+            ],
         ];
     }
 
@@ -1302,6 +1345,23 @@ class TypeAlgebraTest extends \Psalm\Tests\TestCase
                         }
                     }',
                 'error_message' => 'PossiblyNullReference',
+            ],
+            'stillNullAfterNullsafeMethodCall' => [
+                '<?php
+                    interface X {
+                        public function a(): bool;
+                        public function b(): string;
+                    }
+
+                    function foo(?X $x): void {
+                        if (!($x?->a())) {
+                            echo $x->b();
+                        }
+                    }',
+                'error_message' => 'NullReference',
+                [],
+                false,
+                '8.1',
             ],
         ];
     }

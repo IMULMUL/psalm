@@ -1,7 +1,6 @@
 <?php
 namespace Psalm\Tests\Template;
 
-use const DIRECTORY_SEPARATOR;
 use Psalm\Tests\TestCase;
 use Psalm\Tests\Traits;
 
@@ -89,9 +88,13 @@ class NestedTemplateTest extends TestCase
                     }
 
                     /**
-                     * @extends Wrapper<string>
+                     * @implements Wrapper<string>
                      */
-                    interface StringWrapper extends Wrapper {}
+                    class StringWrapper implements Wrapper {
+                        public function unwrap() {
+                            return "hello";
+                        }
+                    }
 
                     /**
                      * @template TInner

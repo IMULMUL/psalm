@@ -5,14 +5,14 @@ use function substr;
 
 /**
  * Represents the type that is the result of a bitmask combination of its parameters.
- * `int-mask<1, 2, 4>` corresponds to `1|2|3|4|5|6|7`
+ * `int-mask<1, 2, 4>` corresponds to `0|1|2|3|4|5|6|7`
  */
 class TIntMask extends TInt
 {
-    /** @var non-empty-array<TLiteralInt|TScalarClassConstant> */
+    /** @var non-empty-array<TLiteralInt|TClassConstant> */
     public $values;
 
-    /** @param non-empty-array<TLiteralInt|TScalarClassConstant> $values */
+    /** @param non-empty-array<TLiteralInt|TClassConstant> $values */
     public function __construct(array $values)
     {
         $this->values = $values;

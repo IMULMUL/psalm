@@ -1,15 +1,18 @@
 <?php
 namespace Psalm\Tests\FileUpdates;
 
-use function array_keys;
-use function array_pop;
-use const DIRECTORY_SEPARATOR;
-use function getcwd;
-use function preg_quote;
 use Psalm\Internal\Analyzer\ProjectAnalyzer;
+use Psalm\Internal\Provider\FakeFileProvider;
 use Psalm\Internal\Provider\Providers;
 use Psalm\Tests\Internal\Provider;
 use Psalm\Tests\TestConfig;
+
+use function array_keys;
+use function array_pop;
+use function getcwd;
+use function preg_quote;
+
+use const DIRECTORY_SEPARATOR;
 
 class ErrorAfterUpdateTest extends \Psalm\Tests\TestCase
 {
@@ -17,7 +20,7 @@ class ErrorAfterUpdateTest extends \Psalm\Tests\TestCase
     {
         parent::setUp();
 
-        $this->file_provider = new \Psalm\Tests\Internal\Provider\FakeFileProvider();
+        $this->file_provider = new FakeFileProvider();
 
         $config = new TestConfig();
 
@@ -164,7 +167,7 @@ class ErrorAfterUpdateTest extends \Psalm\Tests\TestCase
                                 }
                             }
 
-                            (new B)->foo();',
+                            echo (new B)->foo();',
                     ],
                     [
                         getcwd() . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR . 'A.php' => '<?php
@@ -183,7 +186,7 @@ class ErrorAfterUpdateTest extends \Psalm\Tests\TestCase
                                 }
                             }
 
-                            (new B)->foo();',
+                            echo (new B)->foo();',
                     ],
                 ],
                 'error_message' => 'InvalidReturnStatement',
@@ -206,7 +209,7 @@ class ErrorAfterUpdateTest extends \Psalm\Tests\TestCase
                                 }
                             }
 
-                            (new B)->foo();',
+                            echo (new B)->foo();',
                     ],
                     [
                         getcwd() . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR . 'A.php' => '<?php
@@ -224,7 +227,7 @@ class ErrorAfterUpdateTest extends \Psalm\Tests\TestCase
                                 }
                             }
 
-                            (new B)->foo();',
+                            echo (new B)->foo();',
                     ],
                 ],
                 'error_message' => 'InvalidReturnStatement',
@@ -257,7 +260,7 @@ class ErrorAfterUpdateTest extends \Psalm\Tests\TestCase
                                 }
                             }
 
-                            (new C)->existingMethod();',
+                            echo (new C)->existingMethod();',
                     ],
                     [
                         getcwd() . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR . 'A.php' => '<?php
@@ -287,7 +290,7 @@ class ErrorAfterUpdateTest extends \Psalm\Tests\TestCase
                                 public function newMethod() : void {}
                             }
 
-                            (new C)->existingMethod();
+                            echo (new C)->existingMethod();
                             // newly-added call, removed in the next code block
                             (new C)->newMethod();',
                     ],
@@ -317,7 +320,7 @@ class ErrorAfterUpdateTest extends \Psalm\Tests\TestCase
                                 }
                             }
 
-                            (new C)->existingMethod();',
+                            echo (new C)->existingMethod();',
                     ],
                 ],
                 'error_message' => 'NullableReturnStatement',

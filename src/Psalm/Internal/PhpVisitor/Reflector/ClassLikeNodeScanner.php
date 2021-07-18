@@ -1,20 +1,11 @@
 <?php
 namespace Psalm\Internal\PhpVisitor\Reflector;
 
-use Psalm\Internal\Analyzer\NamespaceAnalyzer;
-use Psalm\Internal\Scanner\ClassLikeDocblockComment;
-use function array_merge;
-use function array_pop;
-use function count;
-use function explode;
-use function implode;
 use PhpParser;
-use function preg_match;
-use function preg_replace;
 use Psalm\Aliases;
-use Psalm\Codebase;
 use Psalm\CodeLocation;
 use Psalm\CodeLocation\DocblockTypeLocation;
+use Psalm\Codebase;
 use Psalm\Config;
 use Psalm\DocComment;
 use Psalm\Exception\DocblockParseException;
@@ -24,8 +15,10 @@ use Psalm\Exception\TypeParseTreeException;
 use Psalm\Internal\Analyzer\ClassAnalyzer;
 use Psalm\Internal\Analyzer\ClassLikeAnalyzer;
 use Psalm\Internal\Analyzer\CommentAnalyzer;
+use Psalm\Internal\Analyzer\NamespaceAnalyzer;
 use Psalm\Internal\Analyzer\Statements\Expression\SimpleTypeInferer;
 use Psalm\Internal\Codebase\PropertyMap;
+use Psalm\Internal\Scanner\ClassLikeDocblockComment;
 use Psalm\Internal\Scanner\FileScanner;
 use Psalm\Internal\Type\TypeAlias;
 use Psalm\Internal\Type\TypeParser;
@@ -40,15 +33,24 @@ use Psalm\Storage\FileStorage;
 use Psalm\Storage\MethodStorage;
 use Psalm\Storage\PropertyStorage;
 use Psalm\Type;
-use function strtolower;
-use function trim;
-use function str_replace;
-use function preg_split;
-use const PREG_SPLIT_DELIM_CAPTURE;
-use const PREG_SPLIT_NO_EMPTY;
+
+use function array_merge;
+use function array_pop;
 use function array_shift;
 use function array_values;
+use function count;
+use function explode;
 use function get_class;
+use function implode;
+use function preg_match;
+use function preg_replace;
+use function preg_split;
+use function str_replace;
+use function strtolower;
+use function trim;
+
+use const PREG_SPLIT_DELIM_CAPTURE;
+use const PREG_SPLIT_NO_EMPTY;
 
 class ClassLikeNodeScanner
 {
@@ -193,7 +195,11 @@ class ClassLikeNodeScanner
                     $storage->aliases = $this->aliases;
 
                     foreach ($storage->dependent_classlikes as $dependent_name_lc => $_) {
-                        $dependent_storage = $this->codebase->classlike_storage_provider->get($dependent_name_lc);
+                        try {
+                            $dependent_storage = $this->codebase->classlike_storage_provider->get($dependent_name_lc);
+                        } catch (\InvalidArgumentException $exception) {
+                            continue;
+                        }
                         $dependent_storage->populated = false;
                         $this->codebase->classlike_storage_provider->makeNew($dependent_name_lc);
                     }
@@ -251,14 +257,6 @@ class ClassLikeNodeScanner
                 $storage->parent_classes[$parent_fqcln_lc] = $parent_fqcln;
                 $this->file_storage->required_classes[strtolower($parent_fqcln)] = $parent_fqcln;
             }
-
-            foreach ($node->implements as $interface) {
-                $interface_fqcln = ClassLikeAnalyzer::getFQCLNFromNameObject($interface, $this->aliases);
-                $this->codebase->scanner->queueClassLikeForScanning($interface_fqcln);
-                $storage->class_implements[strtolower($interface_fqcln)] = $interface_fqcln;
-                $storage->direct_class_interfaces[strtolower($interface_fqcln)] = $interface_fqcln;
-                $this->file_storage->required_interfaces[strtolower($interface_fqcln)] = $interface_fqcln;
-            }
         } elseif ($node instanceof PhpParser\Node\Stmt\Interface_) {
             $storage->is_interface = true;
             $this->codebase->classlikes->addFullyQualifiedInterfaceName($fq_classlike_name, $this->file_path);
@@ -273,8 +271,39 @@ class ClassLikeNodeScanner
             }
         } elseif ($node instanceof PhpParser\Node\Stmt\Trait_) {
             $storage->is_trait = true;
-            $this->file_storage->has_trait = true;
             $this->codebase->classlikes->addFullyQualifiedTraitName($fq_classlike_name, $this->file_path);
+        } elseif ($node instanceof PhpParser\Node\Stmt\Enum_) {
+            $storage->is_enum = true;
+
+            if ($node->scalarType) {
+                $storage->enum_type = $node->scalarType->name === 'string' ? 'string' : 'int';
+            }
+
+            $this->codebase->scanner->queueClassLikeForScanning('UnitEnum');
+            $storage->class_implements['unitenum'] = 'UnitEnum';
+            $storage->direct_class_interfaces['unitenum'] = 'UnitEnum';
+            $this->file_storage->required_interfaces['unitenum'] = 'UnitEnum';
+            $storage->final = true;
+
+            $storage->declaring_method_ids['cases'] = new \Psalm\Internal\MethodIdentifier(
+                'UnitEnum',
+                'cases'
+            );
+            $storage->appearing_method_ids['cases'] = $storage->declaring_method_ids['cases'];
+
+            $this->codebase->classlikes->addFullyQualifiedEnumName($fq_classlike_name, $this->file_path);
+        } else {
+            throw new \UnexpectedValueException('Unknown classlike type');
+        }
+
+        if ($node instanceof PhpParser\Node\Stmt\Class_ || $node instanceof PhpParser\Node\Stmt\Enum_) {
+            foreach ($node->implements as $interface) {
+                $interface_fqcln = ClassLikeAnalyzer::getFQCLNFromNameObject($interface, $this->aliases);
+                $this->codebase->scanner->queueClassLikeForScanning($interface_fqcln);
+                $storage->class_implements[strtolower($interface_fqcln)] = $interface_fqcln;
+                $storage->direct_class_interfaces[strtolower($interface_fqcln)] = $interface_fqcln;
+                $this->file_storage->required_interfaces[strtolower($interface_fqcln)] = $interface_fqcln;
+            }
         }
 
         $docblock_info = null;
@@ -601,13 +630,6 @@ class ClassLikeNodeScanner
 
                 if ($key === 0) {
                     $storage->mixin_declaring_fqcln = $storage->name;
-
-                    // backwards compatibility
-                    if ($mixin_type instanceof Type\Atomic\TNamedObject
-                        || $mixin_type instanceof Type\Atomic\TTemplateParam) {
-                        /** @psalm-suppress DeprecatedProperty **/
-                        $storage->mixin = $mixin_type;
-                    }
                 }
             }
 
@@ -628,6 +650,10 @@ class ClassLikeNodeScanner
         foreach ($node->stmts as $node_stmt) {
             if ($node_stmt instanceof PhpParser\Node\Stmt\ClassConst) {
                 $this->visitClassConstDeclaration($node_stmt, $storage, $fq_classlike_name);
+            } elseif ($node_stmt instanceof PhpParser\Node\Stmt\EnumCase
+                && $node instanceof PhpParser\Node\Stmt\Enum_
+            ) {
+                $this->visitEnumDeclaration($node_stmt, $storage);
             }
         }
 
@@ -1219,6 +1245,23 @@ class ClassLikeNodeScanner
                 }
             }
         }
+    }
+
+    private function visitEnumDeclaration(
+        PhpParser\Node\Stmt\EnumCase $stmt,
+        ClassLikeStorage $storage
+    ): void {
+        $enum_value = null;
+
+        if ($stmt->expr instanceof PhpParser\Node\Scalar\String_
+            || $stmt->expr instanceof PhpParser\Node\Scalar\LNumber
+        ) {
+            $enum_value = $stmt->expr->value;
+        }
+
+        $storage->enum_cases[$stmt->name->name] = new \Psalm\Storage\EnumCaseStorage(
+            $enum_value
+        );
     }
 
     private function visitPropertyDeclaration(

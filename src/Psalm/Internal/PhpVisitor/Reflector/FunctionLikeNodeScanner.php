@@ -1,15 +1,10 @@
 <?php
 namespace Psalm\Internal\PhpVisitor\Reflector;
 
-use function array_pop;
-use function count;
-use function explode;
-use function implode;
-use function is_string;
 use PhpParser;
 use Psalm\Aliases;
-use Psalm\Codebase;
 use Psalm\CodeLocation;
+use Psalm\Codebase;
 use Psalm\Config;
 use Psalm\Exception\DocblockParseException;
 use Psalm\Exception\IncorrectDocblockException;
@@ -33,9 +28,15 @@ use Psalm\Storage\FunctionStorage;
 use Psalm\Storage\MethodStorage;
 use Psalm\Storage\PropertyStorage;
 use Psalm\Type;
+
+use function array_pop;
+use function count;
+use function explode;
+use function implode;
+use function is_string;
+use function strlen;
 use function strpos;
 use function strtolower;
-use function strlen;
 
 class FunctionLikeNodeScanner
 {
@@ -168,7 +169,7 @@ class FunctionLikeNodeScanner
         $has_optional_param = false;
 
         $existing_params = [];
-        $storage->params = [];
+        $storage->setParams([]);
 
         foreach ($stmt->getParams() as $param) {
             if ($param->var instanceof PhpParser\Node\Expr\Error) {
@@ -217,8 +218,7 @@ class FunctionLikeNodeScanner
             }
 
             $existing_params['$' . $param_storage->name] = $i;
-            $storage->param_lookup[$param_storage->name] = !!$param->type;
-            $storage->params[] = $param_storage;
+            $storage->addParam($param_storage, !!$param->type);
 
             if (!$param_storage->is_optional && !$param_storage->is_variadic) {
                 $required_param_count = $i + 1;
@@ -339,6 +339,20 @@ class FunctionLikeNodeScanner
                 }
 
                 $storage->assertions = $var_assertions;
+            }
+
+            if ($stmt instanceof PhpParser\Node\Stmt\ClassMethod
+                && $stmt->stmts
+                && $storage instanceof MethodStorage
+            ) {
+                $last_stmt = \end($stmt->stmts);
+
+                if ($last_stmt instanceof PhpParser\Node\Stmt\Return_
+                    && $last_stmt->expr instanceof PhpParser\Node\Expr\Variable
+                    && $last_stmt->expr->name === 'this'
+                ) {
+                    $storage->probably_fluent = true;
+                }
             }
         }
 
@@ -601,16 +615,14 @@ class FunctionLikeNodeScanner
                 $classlike_storage->appearing_property_ids[$param_storage->name] = $property_id;
                 $classlike_storage->initialized_properties[$param_storage->name] = true;
             }
-        }
 
-        if ($stmt instanceof PhpParser\Node\Stmt\ClassMethod
-            && $stmt->name->name === '__construct'
-            && $classlike_storage
-            && $storage instanceof MethodStorage
-            && $storage->params
-            && $this->config->infer_property_types_from_constructor
-        ) {
-            $this->inferPropertyTypeFromConstructor($stmt, $storage, $classlike_storage);
+            if ($stmt instanceof PhpParser\Node\Stmt\ClassMethod
+                && $storage instanceof MethodStorage
+                && $storage->params
+                && $this->config->infer_property_types_from_constructor
+            ) {
+                $this->inferPropertyTypeFromConstructor($stmt, $storage, $classlike_storage);
+            }
         }
 
         foreach ($stmt->getAttrGroups() as $attr_group) {

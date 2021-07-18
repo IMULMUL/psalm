@@ -4,7 +4,7 @@
 
 ### Using a template repository
 
-Head over to [plugin template repository](https://github.com/weirdan/psalm-plugin-skeleton) on Github and click `Use this template` button.
+Head over to [plugin template repository](https://github.com/weirdan/psalm-plugin-skeleton) on Github, login and click `Use this template` button.
 
 ### Using skeleton project
 
@@ -34,6 +34,14 @@ Skeleton/template project includes the code to register all `.phpstub` files fro
 
 To register a stub file manually use `Psalm\Plugin\RegistrationInterface::addStubFile()`.
 
+## Registering custom scanners and analyzers
+
+In addition to XML configuration node `<fileExtensions>` plugins can register their own custom scanner
+and analyzer implementations for particular file extensions, e.g.
+
+* `Psalm\Plugin\RegistrationInterface::addFileTypeScanner('html', CustomFileScanner::class)`
+* `Psalm\Plugin\RegistrationInterface::addFileTypeAnalyzer('html', CustomFileAnalyzer::class)`
+
 ## Publishing your plugin on Packagist
 
 Follow instructions on packagist.org under 'Publishing Packages' section.
@@ -50,16 +58,16 @@ Composer-based plugin is a composer package which conforms to these requirements
 
 ### Psalm API
 
-Plugins may implement one of (or more than one of) `Psalm\Plugin\Hook\*` interface(s).
+Plugins may implement one of (or more than one of) `Psalm\Plugin\EventHandler\*` interface(s).
 
 ```php
 <?php
-class SomePlugin implements \Psalm\Plugin\Hook\AfterStatementAnalysisInterface
+class SomePlugin implements \Psalm\Plugin\EventHandler\AfterStatementAnalysisInterface
 {
 }
 ```
 
-`Psalm\Plugin\Hook\*` offers the following interfaces that you can implement:
+`Psalm\Plugin\EventHandler\*` offers the following interfaces that you can implement:
 
 - `AfterAnalysisInterface` - called after Psalm has completed its analysis. Use this hook if you want to do something with the analysis results.
 - `AfterClassLikeAnalysisInterface` - called after Psalm has completed its analysis of a given class.
@@ -138,4 +146,6 @@ You can also use more complex rules in the `<issueHandler />` element, as you ca
 
 ## Upgrading file-based plugin to composer-based version
 
-Create new plugin project using skeleton, then pass the class name of you file-based plugin to `registerHooksFromClass()` method of the `Psalm\Plugin\RegistrationInterface` instance that was passed into your plugin entry point's `__invoke()` method. See the [conversion example](https://github.com/vimeo/psalm/tree/master/examples/plugins/composer-based/echo-checker/).
+Create new plugin project using skeleton, then pass the class name of you file-based plugin to `registerHooksFromClass()`
+method of the `Psalm\Plugin\RegistrationInterface` instance that was passed into your plugin entry point's `__invoke()`
+method. See the [conversion example](https://github.com/vimeo/psalm/tree/master/examples/plugins/composer-based/echo-checker/).

@@ -1,8 +1,6 @@
 <?php
 namespace Psalm\Internal\Codebase;
 
-use function explode;
-use function preg_replace;
 use Psalm\CodeLocation;
 use Psalm\Context;
 use Psalm\Internal\Provider\ClassLikeStorageProvider;
@@ -11,8 +9,10 @@ use Psalm\Internal\Provider\PropertyExistenceProvider;
 use Psalm\Internal\Provider\PropertyTypeProvider;
 use Psalm\Internal\Provider\PropertyVisibilityProvider;
 use Psalm\StatementsSource;
-use Psalm\Storage\ClassLikeStorage;
 use Psalm\Type;
+
+use function explode;
+use function preg_replace;
 use function strtolower;
 
 /**
@@ -132,13 +132,29 @@ class Properties
             if ($context && $context->calling_method_id) {
                 $this->file_reference_provider->addMethodReferenceToClassMember(
                     $context->calling_method_id,
-                    strtolower($declaring_property_class) . '::$' . $property_name
+                    strtolower($declaring_property_class) . '::$' . $property_name,
+                    false
                 );
+
+                if ($read_mode) {
+                    $this->file_reference_provider->addMethodReferenceToClassProperty(
+                        $context->calling_method_id,
+                        strtolower($declaring_property_class) . '::$' . $property_name
+                    );
+                }
             } elseif ($source) {
                 $this->file_reference_provider->addFileReferenceToClassMember(
                     $source->getFilePath(),
-                    strtolower($declaring_property_class) . '::$' . $property_name
+                    strtolower($declaring_property_class) . '::$' . $property_name,
+                    false
                 );
+
+                if ($read_mode) {
+                    $this->file_reference_provider->addFileReferenceToClassProperty(
+                        $source->getFilePath(),
+                        strtolower($declaring_property_class) . '::$' . $property_name
+                    );
+                }
             }
 
             if ($this->collect_locations && $code_location) {

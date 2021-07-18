@@ -3,10 +3,10 @@
 namespace Psalm;
 
 use Composer\Autoload\ClassLoader;
-use Composer\Semver\Semver;
 use Composer\Semver\VersionParser;
 use DOMDocument;
 use LogicException;
+use OutOfBoundsException;
 use Psalm\Config\IssueHandler;
 use Psalm\Config\ProjectFileFilter;
 use Psalm\Config\TaintAnalysisFileFilter;
@@ -22,6 +22,7 @@ use Psalm\Internal\Scanner\FileScanner;
 use Psalm\Issue\ArgumentIssue;
 use Psalm\Issue\ClassIssue;
 use Psalm\Issue\CodeIssue;
+use Psalm\Issue\ConfigIssue;
 use Psalm\Issue\FunctionIssue;
 use Psalm\Issue\MethodIssue;
 use Psalm\Issue\PropertyIssue;
@@ -32,8 +33,13 @@ use SimpleXMLElement;
 use Webmozart\PathUtil\Path;
 use XdgBaseDir\Xdg;
 
+use function array_map;
 use function array_merge;
+use function array_pad;
 use function array_pop;
+use function array_shift;
+use function assert;
+use function basename;
 use function chdir;
 use function class_exists;
 use function count;
@@ -43,10 +49,11 @@ use function file_exists;
 use function file_get_contents;
 use function filetype;
 use function get_class;
-use function getcwd;
 use function get_defined_constants;
 use function get_defined_functions;
+use function getcwd;
 use function glob;
+use function implode;
 use function in_array;
 use function intval;
 use function is_a;
@@ -64,9 +71,12 @@ use function preg_replace;
 use function realpath;
 use function reset;
 use function rmdir;
+use function rtrim;
 use function scandir;
 use function sha1;
 use function simplexml_import_dom;
+use function str_replace;
+use function strlen;
 use function strpos;
 use function strrpos;
 use function strtolower;
@@ -86,12 +96,6 @@ use const LIBXML_ERR_FATAL;
 use const LIBXML_NONET;
 use const PHP_EOL;
 use const SCANDIR_SORT_NONE;
-use function array_map;
-use function rtrim;
-use function str_replace;
-use function array_shift;
-use function array_pad;
-use function implode;
 
 /**
  * @psalm-suppress PropertyNotSetInConstructor
@@ -540,6 +544,9 @@ class Config
      */
     public $eventDispatcher;
 
+    /** @var list<ConfigIssue> */
+    public $config_issues = [];
+
     protected function __construct()
     {
         self::$instance = $this;
@@ -610,7 +617,7 @@ class Config
         }
 
         try {
-            $config = self::loadFromXML($base_dir, $file_contents, $current_dir);
+            $config = self::loadFromXML($base_dir, $file_contents, $current_dir, $file_path);
             $config->hash = sha1($file_contents . \PSALM_VERSION);
         } catch (ConfigException $e) {
             throw new ConfigException(
@@ -627,15 +634,19 @@ class Config
      *
      * @throws ConfigException
      */
-    public static function loadFromXML(string $base_dir, string $file_contents, ?string $current_dir = null): Config
-    {
+    public static function loadFromXML(
+        string $base_dir,
+        string $file_contents,
+        ?string $current_dir = null,
+        ?string $file_path = null
+    ): Config {
         if ($current_dir === null) {
             $current_dir = $base_dir;
         }
 
         self::validateXmlConfig($base_dir, $file_contents);
 
-        return self::fromXmlAndPaths($base_dir, $file_contents, $current_dir);
+        return self::fromXmlAndPaths($base_dir, $file_contents, $current_dir, $file_path);
     }
 
     private static function loadDomDocument(string $base_dir, string $file_contents): DOMDocument
@@ -701,6 +712,71 @@ class Config
         }
     }
 
+    /**
+     * @param positive-int $line_number 1-based line number
+     * @return int 0-based byte offset
+     * @throws OutOfBoundsException
+     */
+    private static function lineNumberToByteOffset(string $string, int $line_number): int
+    {
+        if ($line_number === 1) {
+            return 0;
+        }
+
+        $offset = 0;
+
+        for ($i = 0; $i < $line_number - 1; $i++) {
+            $newline_offset = strpos($string, "\n", $offset);
+            if (false === $newline_offset) {
+                throw new OutOfBoundsException(
+                    'Line ' . $line_number . ' is not found in a string with ' . ($i + 1) . ' lines'
+                );
+            }
+            $offset = $newline_offset + 1;
+        }
+
+        if ($offset > strlen($string)) {
+            throw new OutOfBoundsException('Line ' . $line_number . ' is not found');
+        }
+
+        return $offset;
+    }
+
+    private static function processConfigDeprecations(
+        self $config,
+        DOMDocument $dom_document,
+        string $file_contents,
+        string $config_path
+    ): void {
+        // Attributes to be removed in Psalm 5
+        $deprecated_attributes = [
+            'allowCoercionFromStringToClassConst'
+        ];
+
+        $config->config_issues = [];
+        $attributes = $dom_document->getElementsByTagName('psalm')->item(0)->attributes;
+        foreach ($attributes as $attribute) {
+            if (in_array($attribute->name, $deprecated_attributes, true)) {
+                $line = $attribute->getLineNo();
+                assert($line > 0); // getLineNo() always returns non-zero for nodes loaded from file
+                $offset = self::lineNumberToByteOffset($file_contents, $line);
+                $attribute_start = strrpos($file_contents, $attribute->name, $offset - strlen($file_contents)) ?: 0;
+                $attribute_end = $attribute_start + strlen($attribute->name) - 1;
+
+                $config->config_issues[] = new ConfigIssue(
+                    'Attribute "' . $attribute->name . '" is deprecated '
+                    . 'and is going to be removed in the next major version',
+                    new CodeLocation\Raw(
+                        $file_contents,
+                        $config_path,
+                        basename($config_path),
+                        $attribute_start,
+                        $attribute_end
+                    )
+                );
+            }
+        }
+    }
 
     /**
      * @psalm-suppress MixedMethodCall
@@ -711,11 +787,24 @@ class Config
      *
      * @throws ConfigException
      */
-    private static function fromXmlAndPaths(string $base_dir, string $file_contents, string $current_dir): self
-    {
+    private static function fromXmlAndPaths(
+        string $base_dir,
+        string $file_contents,
+        string $current_dir,
+        ?string $config_path
+    ): self {
         $config = new static();
 
         $dom_document = self::loadDomDocument($base_dir, $file_contents);
+
+        if (null !== $config_path) {
+            self::processConfigDeprecations(
+                $config,
+                $dom_document,
+                $file_contents,
+                $config_path
+            );
+        }
 
         $config_xml = simplexml_import_dom($dom_document);
 
@@ -800,8 +889,19 @@ class Config
 
         $config->cache_directory .= DIRECTORY_SEPARATOR . sha1($base_dir);
 
+        $cwd = null;
+
+        if ($config->resolve_from_config_file) {
+            $cwd = getcwd();
+            chdir($config->base_dir);
+        }
+
         if (is_dir($config->cache_directory) === false && @mkdir($config->cache_directory, 0777, true) === false) {
             trigger_error('Could not create cache directory: ' . $config->cache_directory, E_USER_ERROR);
+        }
+
+        if ($cwd) {
+            chdir($cwd);
         }
 
         if (isset($config_xml['serializer'])) {
@@ -1107,7 +1207,7 @@ class Config
         $this->plugin_classes[] = ['class' => $class_name, 'config' => $plugin_config];
     }
 
-    /** @return array<array{class:string, config:?SimpleXmlElement}> */
+    /** @return array<array{class:string, config:?SimpleXMLElement}> */
     public function getPluginClasses(): array
     {
         return $this->plugin_classes;
@@ -1196,6 +1296,20 @@ class Config
                 throw new ConfigException('Failed to load plugin ' . $path, 0, $e);
             }
         }
+        // populate additional aspects after plugins have been initialized
+        foreach ($socket->getAdditionalFileExtensions() as $fileExtension) {
+            $this->file_extensions[] = $fileExtension;
+        }
+        foreach ($socket->getAdditionalFileTypeScanners() as $extension => $className) {
+            $this->filetype_scanners[$extension] = $className;
+        }
+        foreach ($socket->getAdditionalFileTypeAnalyzers() as $extension => $className) {
+            $this->filetype_analyzers[$extension] = $className;
+        }
+
+        new \Psalm\Internal\Provider\AddRemoveTaints\HtmlFunctionTainter();
+
+        $socket->registerHooksFromClass(\Psalm\Internal\Provider\AddRemoveTaints\HtmlFunctionTainter::class);
     }
 
     private static function requirePath(string $path): void
@@ -1503,6 +1617,10 @@ class Config
             return 'UndefinedClass';
         }
 
+        if ($issue_type === 'UnusedForeachValue') {
+            return 'UnusedVariable';
+        }
+
         return null;
     }
 
@@ -1681,6 +1799,16 @@ class Config
             $core_generic_files[] = $stringable_path;
         }
 
+        if (\PHP_VERSION_ID < 80100 && $codebase->php_major_version >= 8 && $codebase->php_minor_version >= 1) {
+            $stringable_path = dirname(__DIR__, 2) . '/stubs/Php81.phpstub';
+
+            if (!file_exists($stringable_path)) {
+                throw new \UnexpectedValueException('Cannot locate PHP 8.1 classes');
+            }
+
+            $core_generic_files[] = $stringable_path;
+        }
+
         $stub_files = array_merge($core_generic_files, $this->preloaded_stub_files);
 
         if (!$stub_files) {
@@ -1737,6 +1865,16 @@ class Config
             $core_generic_files[] = $stringable_path;
         }
 
+        if (\PHP_VERSION_ID >= 80100 && $codebase->php_major_version >= 8 && $codebase->php_minor_version >= 1) {
+            $stringable_path = dirname(__DIR__, 2) . '/stubs/Php81.phpstub';
+
+            if (!file_exists($stringable_path)) {
+                throw new \UnexpectedValueException('Cannot locate PHP 8.1 classes');
+            }
+
+            $core_generic_files[] = $stringable_path;
+        }
+
         if (\extension_loaded('PDO')) {
             $ext_pdo_path = dirname(__DIR__, 2) . '/stubs/pdo.phpstub';
 
@@ -1748,13 +1886,13 @@ class Config
         }
 
         if (\extension_loaded('soap')) {
-            $ext_pdo_path = dirname(__DIR__, 2) . '/stubs/soap.phpstub';
+            $ext_soap_path = dirname(__DIR__, 2) . '/stubs/soap.phpstub';
 
-            if (!file_exists($ext_pdo_path)) {
+            if (!file_exists($ext_soap_path)) {
                 throw new \UnexpectedValueException('Cannot locate soap classes');
             }
 
-            $core_generic_files[] = $ext_pdo_path;
+            $core_generic_files[] = $ext_soap_path;
         }
 
         if (\extension_loaded('ds')) {
@@ -1765,6 +1903,16 @@ class Config
             }
 
             $core_generic_files[] = $ext_ds_path;
+        }
+
+        if (\extension_loaded('mongodb')) {
+            $ext_mongodb_path = dirname(__DIR__, 2) . '/stubs/mongodb.phpstub';
+
+            if (!file_exists($ext_mongodb_path)) {
+                throw new \UnexpectedValueException('Cannot locate mongodb classes');
+            }
+
+            $core_generic_files[] = $ext_mongodb_path;
         }
 
         $stub_files = array_merge($core_generic_files, $this->stub_files);

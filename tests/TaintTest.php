@@ -2,14 +2,17 @@
 namespace Psalm\Tests;
 
 use Psalm\Context;
+use Psalm\Internal\Analyzer\IssueData;
+use Psalm\IssueBuffer;
+
+use function trim;
+
 use const DIRECTORY_SEPARATOR;
 
 class TaintTest extends TestCase
 {
     /**
      * @dataProvider providerValidCodeParse
-     *
-     *
      */
     public function testValidCode(string $code): void
     {
@@ -31,13 +34,13 @@ class TaintTest extends TestCase
 
         $this->project_analyzer->trackTaintedInputs();
 
+        $this->project_analyzer->getCodebase()->config->initializePlugins($this->project_analyzer);
+
         $this->analyzeFile($file_path, new Context(), false);
     }
 
     /**
      * @dataProvider providerInvalidCodeParse
-     *
-     *
      */
     public function testInvalidCode(string $code, string $error_message): void
     {
@@ -77,7 +80,7 @@ class TaintTest extends TestCase
 
                     $data = ["name" => $name, "id" => $id];
 
-                    echo "<h1>" . htmlentities($data["name"]) . "</h1>";
+                    echo "<h1>" . htmlentities($data["name"], \ENT_QUOTES) . "</h1>";
                     echo "<p>" . $data["id"] . "</p>";'
             ],
             'taintedInputInAssignedArrayNotEchoed' => [
@@ -89,7 +92,7 @@ class TaintTest extends TestCase
                     $data["name"] = $name;
                     $data["id"] = $id;
 
-                    echo "<h1>" . htmlentities($data["name"]) . "</h1>";
+                    echo "<h1>" . htmlentities($data["name"], \ENT_QUOTES) . "</h1>";
                     echo "<p>" . $data["id"] . "</p>";'
             ],
             'taintedInputDirectlySuppressed' => [
@@ -196,7 +199,7 @@ class TaintTest extends TestCase
             ],
             'specializedCoreFunctionCall' => [
                 '<?php
-                    $a = (string) $_GET["user_id"];
+                    $a = (string) ($data["user_id"] ?? "");
 
                     echo print_r([], true);
 
@@ -215,7 +218,7 @@ class TaintTest extends TestCase
 
                     class A {
                         public function foo() : void {
-                            echo(htmlentities(Utils::shorten((string) $_GET["user_id"])));
+                            echo(htmlentities(Utils::shorten((string) $_GET["user_id"]), \ENT_QUOTES));
                         }
 
                         public function bar() : void {
@@ -226,7 +229,7 @@ class TaintTest extends TestCase
             'taintHtmlEntities' => [
                 '<?php
                     function foo() : void {
-                        $a = htmlentities((string) $_GET["bad"]);
+                        $a = htmlentities((string) $_GET["bad"], \ENT_QUOTES);
                         echo $a;
                     }'
             ],
@@ -243,6 +246,7 @@ class TaintTest extends TestCase
                         /**
                          * @psalm-pure
                          * @psalm-taint-escape html
+                         * @psalm-taint-escape has_quotes
                          */
                         public static function shorten(string $s) : string {
                             return str_replace("foo", "bar", $s);
@@ -308,6 +312,7 @@ class TaintTest extends TestCase
                         public function foo(O1 $o) : void {
                             /**
                              * @psalm-taint-escape html
+                             * @psalm-taint-escape has_quotes
                              */
                             $a = str_replace("foo", "bar", $o->s);
                             echo $a;
@@ -324,7 +329,7 @@ class TaintTest extends TestCase
 
                         /** @psalm-pure */
                         public static function escape(string $s) : string {
-                            return htmlentities($s);
+                            return htmlentities($s, \ENT_QUOTES);
                         }
                     }
 
@@ -624,6 +629,16 @@ class TaintTest extends TestCase
 
                     echo U::foo($_GET["foo"], true);
                     echo U::foo($_GET["foo"]);'
+            ],
+            'keysAreNotTainted' => [
+                '<?php
+                    function takesArray(array $arr): void {
+                        foreach ($arr as $key => $_) {
+                            echo $key;
+                        }
+                    }
+
+                    takesArray(["good" => $_GET["bad"]]);'
             ],
         ];
     }
@@ -1505,6 +1520,26 @@ class TaintTest extends TestCase
                     print($_GET["name"]);',
                 'error_message' => 'TaintedHtml - src' . DIRECTORY_SEPARATOR . 'somefile.php:2:27 - Detected tainted HTML in path: $_GET -> $_GET[\'name\'] (src/somefile.php:2:27) -> call to print (src/somefile.php:2:27) -> print#1',
             ],
+            'printf' => [
+                '<?php
+                    printf($_GET["name"]);',
+                'error_message' => 'TaintedHtml - src' . DIRECTORY_SEPARATOR . 'somefile.php:2:28 - Detected tainted HTML in path: $_GET -> $_GET[\'name\'] (src/somefile.php:2:28) -> call to printf (src/somefile.php:2:28) -> printf#1',
+            ],
+            'print_r' => [
+                '<?php
+                    print_r($_GET["name"]);',
+                'error_message' => 'TaintedHtml - src' . DIRECTORY_SEPARATOR . 'somefile.php:2:29 - Detected tainted HTML in path: $_GET -> $_GET[\'name\'] (src/somefile.php:2:29) -> call to print_r (src/somefile.php:2:29) -> print_r#1',
+            ],
+            'var_dump' => [
+                '<?php
+                    var_dump($_GET["name"]);',
+                'error_message' => 'TaintedHtml - src' . DIRECTORY_SEPARATOR . 'somefile.php:2:30 - Detected tainted HTML in path: $_GET -> $_GET[\'name\'] (src/somefile.php:2:30) -> call to var_dump (src/somefile.php:2:30) -> var_dump#1',
+            ],
+            'var_export' => [
+                '<?php
+                    var_export($_GET["name"]);',
+                'error_message' => 'TaintedHtml - src' . DIRECTORY_SEPARATOR . 'somefile.php:2:32 - Detected tainted HTML in path: $_GET -> $_GET[\'name\'] (src/somefile.php:2:32) -> call to var_export (src/somefile.php:2:32) -> var_export#1',
+            ],
             'unpackArgs' => [
                 '<?php
                     function test(...$args) {
@@ -2103,15 +2138,15 @@ class TaintTest extends TestCase
                     $res = Wdb::query("SELECT blah FROM tablea ORDER BY ". $order. " DESC");',
                 'error_message' => 'TaintedSql',
             ],
-            'taintArrayKey' => [
+            'keysAreTainted' => [
                 '<?php
-                    function doTheMagic(array $values) {
-                        foreach ($values as $key => $value) {
-                            echo $key . " " . $value;
+                    function takesArray(array $arr): void {
+                        foreach ($arr as $key => $_) {
+                            echo $key;
                         }
                     }
 
-                    doTheMagic([(string)$_GET["bad"] => "foo"]);',
+                    takesArray([$_GET["bad"] => "good"]);',
                 'error_message' => 'TaintedHtml',
             ],
             'taintArrayKeyWithExplicitSink' => [
@@ -2143,6 +2178,108 @@ class TaintTest extends TestCase
                 'error_message' => 'TaintedHtml',
             ],
             */
+        ];
+    }
+
+    /**
+     * @param string $code
+     * @param list<string> $expectedIssuesTypes
+     * @test
+     * @dataProvider multipleTaintIssuesAreDetectedDataProvider
+     */
+    public function multipleTaintIssuesAreDetected(string $code, array $expectedIssuesTypes): void
+    {
+        if (\strpos($this->getTestName(), 'SKIPPED-') !== false) {
+            $this->markTestSkipped();
+        }
+        if (\strtoupper(\substr(\PHP_OS, 0, 3)) === 'WIN') {
+            $this->markTestSkipped('Skip taint tests in Windows for now');
+        }
+
+        // disables issue exceptions - we need all, not just the first
+        $this->testConfig->throw_exception = false;
+        $filePath = self::$src_dir_path . 'somefile.php';
+        $this->addFile($filePath, $code);
+        $this->project_analyzer->trackTaintedInputs();
+
+        $this->analyzeFile($filePath, new Context(), false);
+
+        $actualIssueTypes = \array_map(
+            function (IssueData $issue): string {
+                return $issue->type . '{ ' . trim($issue->snippet) . ' }';
+            },
+            IssueBuffer::getIssuesDataForFile($filePath)
+        );
+        self::assertSame($expectedIssuesTypes, $actualIssueTypes);
+    }
+
+    /**
+     * @return array<string, array{0: string, expectedIssueTypes: list<string>}>
+     */
+    public function multipleTaintIssuesAreDetectedDataProvider(): array
+    {
+        return [
+            'taintSinkFlow' => [
+                '<?php
+                    /**
+                     * @param string $value
+                     * @return string
+                     *
+                     * @psalm-flow ($value) -> return
+                     * @psalm-taint-sink html $value
+                     */
+                    function process(string $value): string {}
+                    $data = process((string)($_GET["inject"] ?? ""));
+                    exec($data);
+                ',
+                'expectedIssueTypes' => [
+                    'TaintedHtml{ function process(string $value): string {} }',
+                    'TaintedShell{ exec($data); }',
+                ],
+            ],
+            'taintSinkCascade' => [
+                '<?php
+                    function triggerHtml(string $value): string
+                    {
+                        echo $value;
+                        return $value;
+                    }
+                    function triggerShell(string $value): string
+                    {
+                        exec($value);
+                        return $value;
+                    }
+                    function triggerFile(string $value): string
+                    {
+                        file_get_contents($value);
+                        return $value;
+                    }
+                    $value = (string)($_GET["inject"] ?? "");
+                    $value = triggerHtml($value);
+                    $value = triggerShell($value);
+                    $value = triggerFile($value);
+                ',
+                'expectedIssueTypes' => [
+                    'TaintedHtml{ echo $value; }',
+                    'TaintedTextWithQuotes{ echo $value; }',
+                    'TaintedShell{ exec($value); }',
+                    'TaintedFile{ file_get_contents($value); }',
+                ],
+            ],
+            'taintedIncludes' => [
+                '<?php
+                    $first = (string)($_GET["first"] ?? "");
+                    $second = (string)($_GET["second"] ?? "");
+                    require $first;
+                    require dirname(__DIR__)."/first.php";
+                    require $second;
+                    require dirname(__DIR__)."/second.php";
+                ',
+                'expectedIssueTypes' => [
+                    'TaintedInclude{ require $first; }',
+                    'TaintedInclude{ require $second; }',
+                ],
+            ],
         ];
     }
 }

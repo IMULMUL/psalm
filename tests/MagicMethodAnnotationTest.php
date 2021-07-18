@@ -1,9 +1,10 @@
 <?php
 namespace Psalm\Tests;
 
-use const DIRECTORY_SEPARATOR;
 use Psalm\Config;
 use Psalm\Context;
+
+use const DIRECTORY_SEPARATOR;
 
 class MagicMethodAnnotationTest extends TestCase
 {
@@ -700,6 +701,34 @@ class MagicMethodAnnotationTest extends TestCase
 
                     namespace Bar {
                         (new \Foo\G)->randomInt();
+                    }'
+            ],
+            'negativeInDefault' => [
+                '<?php
+                    /**
+                     * @method void foo($a = -0.1, $b = -12)
+                     */
+                    class G
+                    {
+                        public function __call(string $method, array $attributes): void
+                        {
+                        }
+                    }
+                    (new G)->foo();'
+            ],
+            'namespacedNegativeInDefault' => [
+                '<?php
+                    namespace Foo {
+                        /**
+                         * @method void foo($a = -0.1, $b = -12)
+                         */
+                        class G
+                        {
+                            public function __call(string $method, array $attributes): void
+                            {
+                            }
+                        }
+                        (new G)->foo();
                     }'
             ],
             'namespacedUnion' => [

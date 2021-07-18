@@ -2,13 +2,12 @@
 namespace Psalm\Internal\Analyzer\Statements\Expression\Call\Method;
 
 use PhpParser;
-use Psalm\Internal\Analyzer\ClassLikeAnalyzer;
-use Psalm\Internal\Analyzer\StatementsAnalyzer;
-use Psalm\Internal\Analyzer\Statements\Expression\Assignment\InstancePropertyAssignmentAnalyzer
-    as AssignmentAnalyzer;
-use Psalm\Codebase;
 use Psalm\CodeLocation;
+use Psalm\Codebase;
 use Psalm\Context;
+use Psalm\Internal\Analyzer\ClassLikeAnalyzer;
+use Psalm\Internal\Analyzer\Statements\Expression\Assignment\InstancePropertyAssignmentAnalyzer as AssignmentAnalyzer;
+use Psalm\Internal\Analyzer\StatementsAnalyzer;
 use Psalm\Internal\MethodIdentifier;
 use Psalm\Issue\ImpureMethodCall;
 use Psalm\IssueBuffer;
@@ -100,15 +99,14 @@ class MethodCallPurityAnalyzer
                 }
 
                 $result->can_memoize = true;
-                $result->immutable_call = $method_storage->immutable;
             }
 
             if ($codebase->find_unused_variables
                 && !$context->inside_conditional
-                && !$context->inside_use
+                && !$context->inside_general_use
                 && !$context->inside_throw
             ) {
-                if (!$context->inside_assignment && !$context->inside_call) {
+                if (!$context->inside_assignment && !$context->inside_call && !$context->inside_return) {
                     if (IssueBuffer::accepts(
                         new \Psalm\Issue\UnusedMethodCall(
                             'The call to ' . $cased_method_id . ' is not used',
@@ -155,12 +153,15 @@ class MethodCallPurityAnalyzer
                 if ($this_property_didnt_exist) {
                     $context->vars_in_scope[$mutation_var_id] = Type::getMixed();
                 } else {
-                    $context->vars_in_scope[$mutation_var_id] = AssignmentAnalyzer::getExpandedPropertyType(
+                    $new_type = AssignmentAnalyzer::getExpandedPropertyType(
                         $codebase,
                         $class_storage->name,
                         $name,
                         $class_storage
                     ) ?: Type::getMixed();
+
+                    $context->vars_in_scope[$mutation_var_id] = $new_type;
+                    $context->possibly_assigned_var_ids[$mutation_var_id] = true;
                 }
             }
         }

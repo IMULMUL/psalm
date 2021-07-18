@@ -4,18 +4,18 @@ namespace Psalm\Internal\Analyzer;
 use PhpParser;
 use PhpParser\Node\Stmt\Class_;
 use Psalm\Aliases;
+use Psalm\CodeLocation;
+use Psalm\Codebase;
+use Psalm\Config;
+use Psalm\Context;
 use Psalm\DocComment;
 use Psalm\Exception\DocblockParseException;
 use Psalm\Internal\Analyzer\Statements\Expression\Call\ClassTemplateParamCollector;
 use Psalm\Internal\Analyzer\Statements\Expression\Fetch\AtomicPropertyFetchAnalyzer;
 use Psalm\Internal\FileManipulation\PropertyDocblockManipulator;
-use Psalm\Internal\Type\TemplateStandinTypeReplacer;
 use Psalm\Internal\Type\Comparator\UnionTypeComparator;
-use Psalm\Codebase;
-use Psalm\CodeLocation;
-use Psalm\Config;
-use Psalm\Context;
 use Psalm\Internal\Type\TemplateInferredTypeReplacer;
+use Psalm\Internal\Type\TemplateStandinTypeReplacer;
 use Psalm\Issue\DeprecatedClass;
 use Psalm\Issue\DeprecatedInterface;
 use Psalm\Issue\DeprecatedTrait;
@@ -52,28 +52,28 @@ use Psalm\Node\Stmt\VirtualClassMethod;
 use Psalm\Node\Stmt\VirtualExpression;
 use Psalm\Node\VirtualArg;
 use Psalm\Node\VirtualIdentifier;
-use Psalm\Node\VirtualParam;
 use Psalm\Plugin\EventHandler\Event\AfterClassLikeAnalysisEvent;
 use Psalm\StatementsSource;
 use Psalm\Storage\ClassLikeStorage;
 use Psalm\Storage\FunctionLikeParameter;
 use Psalm\Type;
-use function preg_replace;
-use function preg_match;
-use function explode;
-use function array_pop;
-use function strtolower;
-use function implode;
-use function substr;
-use function array_map;
-use function str_replace;
-use function count;
-use function array_search;
-use function array_keys;
-use function array_merge;
+
 use function array_filter;
-use function in_array;
+use function array_keys;
+use function array_map;
+use function array_merge;
+use function array_pop;
+use function array_search;
 use function assert;
+use function count;
+use function explode;
+use function implode;
+use function in_array;
+use function preg_match;
+use function preg_replace;
+use function str_replace;
+use function strtolower;
+use function substr;
 
 /**
  * @internal
@@ -85,19 +85,22 @@ class ClassAnalyzer extends ClassLikeAnalyzer
      */
     public $inferred_property_types = [];
 
-    public function __construct(PhpParser\Node\Stmt\Class_ $class, SourceAnalyzer $source, ?string $fq_class_name)
+    /**
+     * @param PhpParser\Node\Stmt\Class_|PhpParser\Node\Stmt\Enum_ $class
+     */
+    public function __construct(PhpParser\Node\Stmt $class, SourceAnalyzer $source, ?string $fq_class_name)
     {
         if (!$fq_class_name) {
+            if (!$class instanceof PhpParser\Node\Stmt\Class_) {
+                throw new \UnexpectedValueException('Anonymous enums are not allowed');
+            }
+
             $fq_class_name = self::getAnonymousClassName($class, $source->getFilePath());
         }
 
         parent::__construct($class, $source, $fq_class_name);
 
-        if (!$this->class instanceof PhpParser\Node\Stmt\Class_) {
-            throw new \InvalidArgumentException('Bad');
-        }
-
-        if ($this->class->extends) {
+        if ($this->class instanceof PhpParser\Node\Stmt\Class_ && $this->class->extends) {
             $this->parent_fq_class_name = self::getFQCLNFromNameObject(
                 $this->class->extends,
                 $this->source->getAliases()
@@ -112,15 +115,15 @@ class ClassAnalyzer extends ClassLikeAnalyzer
     }
 
     /**
-     * @return null|false
+     * @return void
      */
     public function analyze(
         ?Context $class_context = null,
         ?Context $global_context = null
-    ): ?bool {
+    ): void {
         $class = $this->class;
 
-        if (!$class instanceof PhpParser\Node\Stmt\Class_) {
+        if (!$class instanceof PhpParser\Node\Stmt\Class_ && !$class instanceof PhpParser\Node\Stmt\Enum_) {
             throw new \LogicException('Something went badly wrong');
         }
 
@@ -129,7 +132,7 @@ class ClassAnalyzer extends ClassLikeAnalyzer
         $storage = $this->storage;
 
         if ($storage->has_visitor_issues) {
-            return null;
+            return;
         }
 
         if ($class->name
@@ -157,7 +160,7 @@ class ClassAnalyzer extends ClassLikeAnalyzer
                 // fall through
             }
 
-            return null;
+            return;
         }
 
         $project_analyzer = $this->file_analyzer->project_analyzer;
@@ -233,7 +236,7 @@ class ClassAnalyzer extends ClassLikeAnalyzer
 
         $parent_fq_class_name = $this->parent_fq_class_name;
 
-        if ($class->extends && $parent_fq_class_name) {
+        if ($class instanceof PhpParser\Node\Stmt\Class_ && $class->extends && $parent_fq_class_name) {
             $this->checkParentClass(
                 $class,
                 $class->extends,
@@ -329,11 +332,11 @@ class ClassAnalyzer extends ClassLikeAnalyzer
             $fq_class_name,
             $storage
         ) === false) {
-            return false;
+            return;
         }
 
         if ($storage->invalid_dependencies) {
-            return null;
+            return;
         }
 
         if ($this->leftover_stmts) {
@@ -367,7 +370,7 @@ class ClassAnalyzer extends ClassLikeAnalyzer
                         ),
                         $storage->suppressed_issues + $this->getSuppressedIssues()
                     )) {
-                        return false;
+                        return;
                     }
                 }
             }
@@ -418,7 +421,7 @@ class ClassAnalyzer extends ClassLikeAnalyzer
                     $global_context,
                     $constructor_analyzer
                 ) === false) {
-                    return false;
+                    return;
                 }
             } elseif ($stmt instanceof PhpParser\Node\Stmt\Property) {
                 foreach ($stmt->props as $prop) {
@@ -501,14 +504,16 @@ class ClassAnalyzer extends ClassLikeAnalyzer
 
         $config = Config::getInstance();
 
-        $this->checkPropertyInitialization(
-            $codebase,
-            $config,
-            $storage,
-            $class_context,
-            $global_context,
-            $constructor_analyzer
-        );
+        if ($class instanceof PhpParser\Node\Stmt\Class_) {
+            $this->checkPropertyInitialization(
+                $codebase,
+                $config,
+                $storage,
+                $class_context,
+                $global_context,
+                $constructor_analyzer
+            );
+        }
 
         foreach ($class->stmts as $stmt) {
             if ($stmt instanceof PhpParser\Node\Stmt\Property && !isset($stmt->type)) {
@@ -615,7 +620,7 @@ class ClassAnalyzer extends ClassLikeAnalyzer
         );
 
         if ($codebase->config->eventDispatcher->dispatchAfterClassLikeAnalysis($event) === false) {
-            return false;
+            return;
         }
         $file_manipulations = $event->getFileReplacements();
         if ($file_manipulations) {
@@ -624,8 +629,6 @@ class ClassAnalyzer extends ClassLikeAnalyzer
                 $file_manipulations
             );
         }
-
-        return null;
     }
 
     public static function addContextProperties(
@@ -718,18 +721,18 @@ class ClassAnalyzer extends ClassLikeAnalyzer
                         : clone $guide_property_storage->type;
 
                     // Set upper bounds for all templates
-                    $upper_bounds = [];
+                    $lower_bounds = [];
                     $extended_templates = $storage->template_extended_params ?? [];
                     foreach ($extended_templates as $et_name => $et_array) {
                         foreach ($et_array as $et_class_name => $extended_template) {
-                            if (!isset($upper_bounds[$et_class_name][$et_name])) {
-                                $upper_bounds[$et_class_name][$et_name] = $extended_template;
+                            if (!isset($lower_bounds[$et_class_name][$et_name])) {
+                                $lower_bounds[$et_class_name][$et_name] = $extended_template;
                             }
                         }
                     }
 
                     // Get actual types used for templates (to support @template-covariant)
-                    $template_standins = new \Psalm\Internal\Type\TemplateResult($upper_bounds, []);
+                    $template_standins = new \Psalm\Internal\Type\TemplateResult($lower_bounds, []);
                     TemplateStandinTypeReplacer::replace(
                         $guide_property_type,
                         $template_standins,
@@ -749,16 +752,19 @@ class ClassAnalyzer extends ClassLikeAnalyzer
                                 // If template_covariants is set template_types should also be set
                                 assert($parent_storage->template_types !== null);
                                 $pt_name = array_keys($parent_storage->template_types)[$pt_offset];
-                                if (isset($template_standins->upper_bounds[$pt_name][$parent_class])) {
-                                    $upper_bounds[$pt_name][$parent_class] =
-                                        $template_standins->upper_bounds[$pt_name][$parent_class]->type;
+                                if (isset($template_standins->lower_bounds[$pt_name][$parent_class])) {
+                                    $lower_bounds[$pt_name][$parent_class] =
+                                        TemplateStandinTypeReplacer::getMostSpecificTypeFromBounds(
+                                            $template_standins->lower_bounds[$pt_name][$parent_class],
+                                            $codebase
+                                        );
                                 }
                             }
                         }
                         $parent_class = $parent_storage->parent_class;
                     }
 
-                    $template_result = new \Psalm\Internal\Type\TemplateResult([], $upper_bounds);
+                    $template_result = new \Psalm\Internal\Type\TemplateResult([], $lower_bounds);
 
                     TemplateInferredTypeReplacer::replace(
                         $guide_property_type,
@@ -772,7 +778,7 @@ class ClassAnalyzer extends ClassLikeAnalyzer
                     );
 
                     if ($property_storage->location
-                        && !$property_type->equals($guide_property_type)
+                        && !$property_type->equals($guide_property_type, false)
                         && $guide_class_storage->user_defined
                     ) {
                         if (IssueBuffer::accepts(
@@ -1260,7 +1266,7 @@ class ClassAnalyzer extends ClassLikeAnalyzer
                             new PropertyNotSetInConstructor(
                                 'Property ' . $class_storage->name . '::$' . $property_name
                                     . ' is not defined in constructor of '
-                                    . $this->fq_class_name . ' and in any ' . $expected_visibility
+                                    . $this->fq_class_name . ' or in any ' . $expected_visibility
                                     . 'methods called in the constructor',
                                 $error_location,
                                 $property_id
@@ -2153,9 +2159,12 @@ class ClassAnalyzer extends ClassLikeAnalyzer
         }
     }
 
+    /**
+     * @param PhpParser\Node\Stmt\Class_|PhpParser\Node\Stmt\Enum_ $class
+     */
     private function checkImplementedInterfaces(
         Context $class_context,
-        Class_ $class,
+        PhpParser\Node\Stmt $class,
         Codebase $codebase,
         string $fq_class_name,
         ClassLikeStorage $storage
@@ -2190,8 +2199,7 @@ class ClassAnalyzer extends ClassLikeAnalyzer
                 $interface_location,
                 null,
                 null,
-                $this->getSuppressedIssues(),
-                false
+                $this->getSuppressedIssues()
             ) === false) {
                 return false;
             }
@@ -2336,6 +2344,10 @@ class ClassAnalyzer extends ClassLikeAnalyzer
                         );
                     }
 
+                    if ($storage->is_enum && $interface_method_name_lc === 'cases') {
+                        continue;
+                    }
+
                     if (!$implementer_method_storage) {
                         IssueBuffer::accepts(
                             new UnimplementedInterfaceMethod(
@@ -2448,8 +2460,7 @@ class ClassAnalyzer extends ClassLikeAnalyzer
             $parent_reference_location,
             null,
             null,
-            $storage->suppressed_issues + $this->getSuppressedIssues(),
-            false
+            $storage->suppressed_issues + $this->getSuppressedIssues()
         ) === false) {
             return;
         }

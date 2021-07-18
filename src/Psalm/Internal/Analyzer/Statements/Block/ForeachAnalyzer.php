@@ -2,44 +2,46 @@
 namespace Psalm\Internal\Analyzer\Statements\Block;
 
 use PhpParser;
-use Psalm\Codebase;
-use Psalm\Internal\Analyzer\ClassLikeAnalyzer;
-use Psalm\Internal\Analyzer\CommentAnalyzer;
-use Psalm\Internal\Analyzer\Statements\Expression\AssignmentAnalyzer;
-use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
-use Psalm\Internal\Analyzer\Statements\Expression\ExpressionIdentifier;
-use Psalm\Internal\Analyzer\Statements\Expression\Fetch\VariableFetchAnalyzer;
-use Psalm\Internal\Analyzer\Statements\Expression\Fetch\ArrayFetchAnalyzer;
-use Psalm\Internal\Analyzer\StatementsAnalyzer;
-use Psalm\Internal\Type\Comparator\AtomicTypeComparator;
-use Psalm\Internal\FileManipulation\FileManipulationBuffer;
 use Psalm\CodeLocation;
+use Psalm\Codebase;
 use Psalm\Context;
 use Psalm\Exception\DocblockParseException;
+use Psalm\Internal\Analyzer\ClassLikeAnalyzer;
+use Psalm\Internal\Analyzer\ClassLikeNameOptions;
+use Psalm\Internal\Analyzer\CommentAnalyzer;
+use Psalm\Internal\Analyzer\Statements\Expression\AssignmentAnalyzer;
+use Psalm\Internal\Analyzer\Statements\Expression\ExpressionIdentifier;
+use Psalm\Internal\Analyzer\Statements\Expression\Fetch\ArrayFetchAnalyzer;
+use Psalm\Internal\Analyzer\Statements\Expression\Fetch\VariableFetchAnalyzer;
+use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
+use Psalm\Internal\Analyzer\StatementsAnalyzer;
+use Psalm\Internal\FileManipulation\FileManipulationBuffer;
+use Psalm\Internal\Scope\LoopScope;
+use Psalm\Internal\Type\Comparator\AtomicTypeComparator;
 use Psalm\Issue\ImpureMethodCall;
 use Psalm\Issue\InvalidDocblock;
 use Psalm\Issue\InvalidIterator;
 use Psalm\Issue\NullIterator;
+use Psalm\Issue\PossibleRawObjectIteration;
 use Psalm\Issue\PossiblyFalseIterator;
 use Psalm\Issue\PossiblyInvalidIterator;
 use Psalm\Issue\PossiblyNullIterator;
-use Psalm\Issue\PossibleRawObjectIteration;
 use Psalm\Issue\RawObjectIteration;
 use Psalm\Issue\UnnecessaryVarAnnotation;
 use Psalm\IssueBuffer;
-use Psalm\Internal\Scope\LoopScope;
 use Psalm\Node\Expr\VirtualMethodCall;
 use Psalm\Node\VirtualIdentifier;
 use Psalm\Type;
-use function is_string;
-use function in_array;
-use function array_merge;
+
 use function array_intersect_key;
-use function array_values;
-use function strtolower;
-use function array_map;
-use function array_search;
 use function array_keys;
+use function array_map;
+use function array_merge;
+use function array_search;
+use function array_values;
+use function in_array;
+use function is_string;
+use function strtolower;
 
 /**
  * @internal
@@ -91,6 +93,10 @@ class ForeachAnalyzer
 
         if ($stmt->valueVar instanceof PhpParser\Node\Expr\Variable && is_string($stmt->valueVar->name)) {
             $safe_var_ids['$' . $stmt->valueVar->name] = true;
+            $statements_analyzer->foreach_var_locations['$' . $stmt->valueVar->name][] = new CodeLocation(
+                $statements_analyzer,
+                $stmt->valueVar
+            );
         } elseif ($stmt->valueVar instanceof PhpParser\Node\Expr\List_) {
             foreach ($stmt->valueVar->items as $list_item) {
                 if (!$list_item) {
@@ -188,12 +194,12 @@ class ForeachAnalyzer
             }
         }
 
-        $was_inside_use = $context->inside_use;
-        $context->inside_use = true;
+        $was_inside_general_use = $context->inside_general_use;
+        $context->inside_general_use = true;
         if (ExpressionAnalyzer::analyze($statements_analyzer, $stmt->expr, $context) === false) {
             return false;
         }
-        $context->inside_use = $was_inside_use;
+        $context->inside_general_use = $was_inside_general_use;
 
         $key_type = null;
         $value_type = null;
@@ -360,8 +366,9 @@ class ForeachAnalyzer
                 ),
                 $statements_analyzer->getSuppressedIssues()
             )) {
-                return false;
             }
+
+            return false;
         } elseif ($iterator_type->isNullable() && !$iterator_type->ignore_nullable_issues) {
             if (IssueBuffer::accepts(
                 new PossiblyNullIterator(
@@ -370,9 +377,13 @@ class ForeachAnalyzer
                 ),
                 $statements_analyzer->getSuppressedIssues()
             )) {
-                return false;
+                // fall through
             }
-        } elseif ($iterator_type->isFalsable() && !$iterator_type->ignore_falsable_issues) {
+
+            return null;
+        }
+
+        if ($iterator_type->isFalsable() && !$iterator_type->ignore_falsable_issues) {
             if (IssueBuffer::accepts(
                 new PossiblyFalseIterator(
                     'Cannot iterate over falsable var ' . $iterator_type,
@@ -380,8 +391,10 @@ class ForeachAnalyzer
                 ),
                 $statements_analyzer->getSuppressedIssues()
             )) {
-                return false;
+                // fall through
             }
+
+            return null;
         }
 
         $has_valid_iterator = false;
@@ -609,7 +622,8 @@ class ForeachAnalyzer
                         new CodeLocation($statements_analyzer->getSource(), $expr),
                         $context->self,
                         $context->calling_method_id,
-                        $statements_analyzer->getSuppressedIssues()
+                        $statements_analyzer->getSuppressedIssues(),
+                        new ClassLikeNameOptions(true)
                     ) === false) {
                         return false;
                     }

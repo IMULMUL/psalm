@@ -1,16 +1,8 @@
 <?php
 namespace Psalm\Type;
 
-use Psalm\Type\Atomic\TInt;
-use Psalm\Type\Atomic\TScalar;
-use function array_pop;
-use function array_shift;
-use function count;
-use function explode;
-use function implode;
-use function ksort;
-use Psalm\Codebase;
 use Psalm\CodeLocation;
+use Psalm\Codebase;
 use Psalm\Internal\Analyzer\StatementsAnalyzer;
 use Psalm\Internal\Type\AssertionReconciler;
 use Psalm\Issue\DocblockTypeContradiction;
@@ -23,20 +15,29 @@ use Psalm\Issue\TypeDoesNotContainType;
 use Psalm\IssueBuffer;
 use Psalm\Type;
 use Psalm\Type\Atomic\TEmpty;
+use Psalm\Type\Atomic\TInt;
 use Psalm\Type\Atomic\TMixed;
 use Psalm\Type\Atomic\TNamedObject;
 use Psalm\Type\Atomic\TNull;
 use Psalm\Type\Atomic\TObject;
+use Psalm\Type\Atomic\TScalar;
 use Psalm\Type\Atomic\TString;
 use Psalm\Type\Atomic\TTemplateParam;
+
+use function array_merge;
+use function array_pop;
+use function array_shift;
+use function count;
+use function explode;
+use function implode;
+use function ksort;
+use function preg_match;
+use function preg_quote;
 use function str_replace;
 use function str_split;
 use function strpos;
 use function strtolower;
 use function substr;
-use function preg_match;
-use function preg_quote;
-use function array_merge;
 
 class Reconciler
 {
@@ -96,7 +97,8 @@ class Reconciler
             $has_falsyish = false;
             $has_empty = false;
             $has_count_check = false;
-            $is_equality = ($old_new_types[$key] ?? null) === $new_type_parts;
+            $is_real = ($old_new_types[$key] ?? null) === $new_type_parts;
+            $is_equality = $is_real;
 
             foreach ($new_type_parts as $new_type_part_parts) {
                 foreach ($new_type_part_parts as $new_type_part_part) {
@@ -160,9 +162,20 @@ class Reconciler
                 $orred_type = null;
 
                 foreach ($new_type_part_parts as $new_type_part_part) {
-                    if ($new_type_part_part[0] === '>') {
-                        /** @var array<string, array<int, array<int, string>>> */
-                        $data = \json_decode(substr($new_type_part_part, 1), true);
+                    if ($new_type_part_part[0] === '>'
+                        || ($new_type_part_part[0] === '!'
+                            && $new_type_part_part[1] === '>')
+                    ) {
+                        if ($new_type_part_part[0] === '!') {
+                            $nested_negated = !$negated;
+
+                            /** @var array<string, array<int, array<int, string>>> */
+                            $data = \json_decode(substr($new_type_part_part, 2), true);
+                        } else {
+                            $nested_negated = $negated;
+                            /** @var array<string, array<int, array<int, string>>> */
+                            $data = \json_decode(substr($new_type_part_part, 1), true);
+                        }
 
                         $existing_types = self::reconcileKeyedTypes(
                             $data,
@@ -174,10 +187,10 @@ class Reconciler
                             $template_type_map,
                             $inside_loop,
                             $code_location,
-                            $negated
+                            $nested_negated
                         );
 
-                        $new_type_part_part = '!falsy';
+                        $new_type_part_part = ($nested_negated ? '' : '!') . 'falsy';
                     }
 
                     $result_type_candidate = AssertionReconciler::reconcile(
@@ -260,6 +273,7 @@ class Reconciler
 
                         if (!isset($new_types[$new_key])
                             && preg_match('/' . preg_quote($key, '/') . '[\]\[\-]/', $new_key)
+                            && $is_real
                         ) {
                             unset($existing_types[$new_key]);
                         }
@@ -532,10 +546,6 @@ class Reconciler
         }
 
         $base_key = array_shift($key_parts);
-
-        if ($base_key === 'C::A' && isset($existing_keys[$base_key]) && $existing_keys[$base_key]->isMixed()) {
-            throw new \Exception("Error Processing Request", 1);
-        }
 
         if ($base_key[0] !== '$' && count($key_parts) > 2 && $key_parts[0] === '::$') {
             $base_key .= array_shift($key_parts);
@@ -891,15 +901,29 @@ class Reconciler
 
         if ($redundant) {
             if ($existing_var_type->from_property && $assertion === 'isset') {
-                if (IssueBuffer::accepts(
-                    new RedundantPropertyInitializationCheck(
-                        'Property type ' . $key . ' with type '
-                            . $old_var_type_string . ' should already be set in the constructor',
-                        $code_location
-                    ),
-                    $suppressed_issues
-                )) {
-                    // fall through
+                if ($existing_var_type->from_static_property) {
+                    if (IssueBuffer::accepts(
+                        new RedundantPropertyInitializationCheck(
+                            'Static property ' . $key . ' with type '
+                                . $old_var_type_string
+                                . ' has unexpected isset check — should it be nullable?',
+                            $code_location
+                        ),
+                        $suppressed_issues
+                    )) {
+                        // fall through
+                    }
+                } else {
+                    if (IssueBuffer::accepts(
+                        new RedundantPropertyInitializationCheck(
+                            'Property ' . $key . ' with type '
+                                . $old_var_type_string . ' should already be set in the constructor',
+                            $code_location
+                        ),
+                        $suppressed_issues
+                    )) {
+                        // fall through
+                    }
                 }
             } elseif ($from_docblock) {
                 if (IssueBuffer::accepts(

@@ -1,9 +1,10 @@
 <?php
 namespace Psalm\Tests;
 
-use function array_values;
 use Psalm\Internal\Type\TypeCombiner;
 use Psalm\Type;
+
+use function array_values;
 
 class TypeCombinationTest extends TestCase
 {
@@ -54,6 +55,15 @@ class TypeCombinationTest extends TestCase
                     function foo(string $type_name) : bool {
                         return $type_name === "array";
                     }',
+            ],
+            'NeverTwice' => [
+                '<?php
+                    /** @return no-return */
+                    function other() {
+                        throw new Exception();
+                    }
+
+                    rand(0,1) ? die() : other();',
             ],
         ];
     }
@@ -719,6 +729,55 @@ class TypeCombinationTest extends TestCase
                 [
                     'non-falsy-string',
                     'non-empty-lowercase-string',
+                ]
+            ],
+            'combineNonEmptyAndEmptyScalar' => [
+                'scalar',
+                [
+                    'non-empty-scalar',
+                    'empty-scalar',
+                ]
+            ],
+            'combineLiteralStringAndNonspecificLiteral' => [
+                'literal-string',
+                [
+                    'literal-string',
+                    '"foo"',
+                ]
+            ],
+            'combineNonspecificLiteralAndLiteralString' => [
+                'literal-string',
+                [
+                    '"foo"',
+                    'literal-string',
+                ]
+            ],
+            'combineLiteralIntAndNonspecificLiteral' => [
+                'literal-int',
+                [
+                    'literal-int',
+                    '5',
+                ]
+            ],
+            'combineNonspecificLiteralAndLiteralInt' => [
+                'literal-int',
+                [
+                    '5',
+                    'literal-int',
+                ]
+            ],
+            'combineNonspecificLiteralAndPositiveInt' => [
+                'int',
+                [
+                    'positive-int',
+                    'literal-int',
+                ]
+            ],
+            'combinePositiveAndLiteralInt' => [
+                'int',
+                [
+                    'literal-int',
+                    'positive-int',
                 ]
             ],
         ];

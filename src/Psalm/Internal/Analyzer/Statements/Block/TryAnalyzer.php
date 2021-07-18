@@ -2,25 +2,28 @@
 namespace Psalm\Internal\Analyzer\Statements\Block;
 
 use PhpParser;
+use Psalm\CodeLocation;
+use Psalm\Context;
 use Psalm\Internal\Analyzer\ClassLikeAnalyzer;
+use Psalm\Internal\Analyzer\ClassLikeNameOptions;
 use Psalm\Internal\Analyzer\ScopeAnalyzer;
 use Psalm\Internal\Analyzer\StatementsAnalyzer;
 use Psalm\Internal\DataFlow\DataFlowNode;
-use Psalm\CodeLocation;
-use Psalm\Context;
+use Psalm\Internal\Scope\FinallyScope;
 use Psalm\Issue\InvalidCatch;
 use Psalm\IssueBuffer;
 use Psalm\Type;
 use Psalm\Type\Atomic\TNamedObject;
 use Psalm\Type\Union;
-use Psalm\Internal\Scope\FinallyScope;
-use function in_array;
-use function array_merge;
+
 use function array_intersect_key;
+use function array_map;
+use function array_merge;
+use function in_array;
 use function is_string;
 use function strtolower;
-use function array_map;
 use function version_compare;
+
 use const PHP_VERSION;
 
 /**
@@ -46,7 +49,8 @@ class TryAnalyzer
             $catch_actions[$i] = ScopeAnalyzer::getControlActions(
                 $catch->stmts,
                 $statements_analyzer->node_data,
-                $codebase->config->exit_functions
+                $codebase->config->exit_functions,
+                []
             );
             $all_catches_leave = $all_catches_leave && !in_array(ScopeAnalyzer::ACTION_NONE, $catch_actions[$i], true);
         }
@@ -105,7 +109,7 @@ class TryAnalyzer
             $stmt->stmts,
             $statements_analyzer->node_data,
             $codebase->config->exit_functions,
-            $context->break_types
+            []
         );
 
         /** @var array<string, int> */
@@ -223,7 +227,7 @@ class TryAnalyzer
                         $context->self,
                         $context->calling_method_id,
                         $statements_analyzer->getSuppressedIssues(),
-                        false
+                        new ClassLikeNameOptions(true)
                     ) === false) {
                         // fall through
                     }
@@ -367,7 +371,7 @@ class TryAnalyzer
                 $catch->stmts,
                 $statements_analyzer->node_data,
                 $codebase->config->exit_functions,
-                $context->break_types
+                []
             );
 
             foreach ($issues_to_suppress as $issue_to_suppress) {

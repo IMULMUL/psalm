@@ -3,13 +3,16 @@
 namespace Psalm\Internal\Type\Comparator;
 
 use Psalm\Codebase;
+use Psalm\Internal\Type\TypeExpander;
 use Psalm\Type;
+use Psalm\Type\Atomic;
 use Psalm\Type\Atomic\TArrayKey;
 use Psalm\Type\Atomic\TFalse;
-use Psalm\Type\Atomic\TTemplateParam;
 use Psalm\Type\Atomic\TMixed;
 use Psalm\Type\Atomic\TNull;
 use Psalm\Type\Atomic\TNumeric;
+use Psalm\Type\Atomic\TTemplateParam;
+
 use function array_merge;
 
 /**
@@ -64,6 +67,28 @@ class UnionTypeComparator
             ) {
                 $input_atomic_types = array_merge($input_type_part->as->getAtomicTypes(), $input_atomic_types);
                 continue;
+            }
+
+            if ($input_type_part instanceof Type\Atomic\TClassConstant) {
+                $expanded = TypeExpander::expandAtomic(
+                    $codebase,
+                    $input_type_part,
+                    $input_type_part->fq_classlike_name,
+                    $input_type_part->fq_classlike_name,
+                    null,
+                    true,
+                    true
+                );
+
+                if ($expanded instanceof Atomic) {
+                    if (!$expanded instanceof Atomic\TClassConstant) {
+                        $input_atomic_types[] = $expanded;
+                        continue;
+                    }
+                } else {
+                    $input_atomic_types = array_merge($expanded, $input_atomic_types);
+                    continue;
+                }
             }
 
             $type_match_found = false;
@@ -266,6 +291,10 @@ class UnionTypeComparator
         ?Type\Union $input_type,
         Type\Union $container_type
     ): bool {
+        if ($container_type->isMixed()) {
+            return true;
+        }
+
         if (!$input_type) {
             return false;
         }

@@ -7,7 +7,6 @@ use Psalm\Config;
 use Psalm\Internal\Analyzer\ProjectAnalyzer;
 use Psalm\Internal\Codebase\Analyzer;
 use Psalm\Internal\EventDispatcher;
-use Psalm\Internal\ExecutionEnvironment\BuildInfoCollector;
 use Psalm\IssueBuffer;
 use Psalm\Report\ReportOptions;
 
@@ -55,11 +54,31 @@ class IssueBufferTest extends TestCase
                     0,
                     0
                 )
-            ]
+            ],
+            '/path/three.php' => [
+                new \Psalm\Internal\Analyzer\IssueData(
+                    "error",
+                    0,
+                    0,
+                    "MissingPropertyType",
+                    'Message',
+                    "three.php",
+                    "/path/three.php",
+                    "snippet-3-has-carriage-return\r",
+                    "snippet-3-has-carriage-return\r",
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                )
+            ],
         ]);
         $baseline = [
             'one.php' => ['MissingPropertyType' => ['o' => 1, 's' => ['snippet-1']] ],
             'two.php' => ['MissingPropertyType' => ['o' => 1, 's' => ['snippet-2']] ],
+            'three.php' => ['MissingPropertyType' => ['o' => 1, 's' => ['snippet-3-has-carriage-return']] ],
         ];
 
         $analyzer = $this->createMock(Analyzer::class);

@@ -1,10 +1,12 @@
 <?php
 namespace Psalm\Tests;
 
-use function count;
 use Psalm\Context;
+use Psalm\Internal\Provider\FakeFileProvider;
 use Psalm\Internal\RuntimeCaches;
 use Psalm\Tests\Internal\Provider;
+
+use function count;
 use function strpos;
 
 class FileReferenceTest extends TestCase
@@ -16,7 +18,7 @@ class FileReferenceTest extends TestCase
     {
         RuntimeCaches::clearAll();
 
-        $this->file_provider = new Provider\FakeFileProvider();
+        $this->file_provider = new FakeFileProvider();
 
         $this->project_analyzer = new \Psalm\Internal\Analyzer\ProjectAnalyzer(
             new TestConfig(),

@@ -1,6 +1,16 @@
 <?php
 namespace Psalm\Type\Atomic;
 
+use Psalm\Codebase;
+use Psalm\Internal\Analyzer\StatementsAnalyzer;
+use Psalm\Internal\Type\TemplateInferredTypeReplacer;
+use Psalm\Internal\Type\TemplateResult;
+use Psalm\Internal\Type\TemplateStandinTypeReplacer;
+use Psalm\Internal\Type\TypeCombiner;
+use Psalm\Type;
+use Psalm\Type\Atomic;
+use Psalm\Type\Union;
+
 use function array_keys;
 use function array_map;
 use function count;
@@ -8,15 +18,6 @@ use function get_class;
 use function implode;
 use function is_int;
 use function sort;
-use Psalm\Codebase;
-use Psalm\Internal\Analyzer\StatementsAnalyzer;
-use Psalm\Internal\Type\TypeCombiner;
-use Psalm\Internal\Type\TemplateResult;
-use Psalm\Internal\Type\TemplateStandinTypeReplacer;
-use Psalm\Internal\Type\TemplateInferredTypeReplacer;
-use Psalm\Type;
-use Psalm\Type\Atomic;
-use Psalm\Type\Union;
 
 /**
  * Represents an 'object-like array' - an array with known keys.
@@ -294,6 +295,17 @@ class TKeyedArray extends \Psalm\Type\Atomic
         return $array_type;
     }
 
+    public function isNonEmpty(): bool
+    {
+        foreach ($this->properties as $property) {
+            if (!$property->possibly_undefined) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function __clone()
     {
         foreach ($this->properties as &$property) {
@@ -316,7 +328,7 @@ class TKeyedArray extends \Psalm\Type\Atomic
         ?string $calling_class = null,
         ?string $calling_function = null,
         bool $replace = true,
-        bool $add_upper_bound = false,
+        bool $add_lower_bound = false,
         int $depth = 0
     ) : Atomic {
         $object_like = clone $this;
@@ -340,7 +352,8 @@ class TKeyedArray extends \Psalm\Type\Atomic
                 $calling_class,
                 $calling_function,
                 $replace,
-                $add_upper_bound,
+                $add_lower_bound,
+                null,
                 $depth
             );
         }
@@ -366,7 +379,7 @@ class TKeyedArray extends \Psalm\Type\Atomic
         return $this->properties;
     }
 
-    public function equals(Atomic $other_type): bool
+    public function equals(Atomic $other_type, bool $ensure_source_equality): bool
     {
         if (get_class($other_type) !== static::class) {
             return false;
@@ -385,7 +398,7 @@ class TKeyedArray extends \Psalm\Type\Atomic
                 return false;
             }
 
-            if (!$property_type->equals($other_type->properties[$property_name])) {
+            if (!$property_type->equals($other_type->properties[$property_name], $ensure_source_equality)) {
                 return false;
             }
         }

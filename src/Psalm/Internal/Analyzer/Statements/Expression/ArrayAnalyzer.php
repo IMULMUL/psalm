@@ -2,23 +2,24 @@
 namespace Psalm\Internal\Analyzer\Statements\Expression;
 
 use PhpParser;
+use Psalm\CodeLocation;
 use Psalm\Codebase;
+use Psalm\Context;
 use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
 use Psalm\Internal\Analyzer\StatementsAnalyzer;
-use Psalm\CodeLocation;
-use Psalm\Context;
+use Psalm\Internal\Type\TypeCombiner;
 use Psalm\Issue\DuplicateArrayKey;
 use Psalm\Issue\InvalidArrayOffset;
 use Psalm\Issue\MixedArrayOffset;
 use Psalm\IssueBuffer;
-use Psalm\Type;
-use Psalm\Internal\Type\TypeCombiner;
 use Psalm\Plugin\EventHandler\Event\AddRemoveTaintsEvent;
+use Psalm\Type;
 
-use function preg_match;
 use function array_merge;
 use function array_values;
 use function count;
+use function preg_match;
+
 use const PHP_INT_MAX;
 
 /**
@@ -186,6 +187,8 @@ class ArrayAnalyzer
                     } elseif ($atomic_key_type instanceof Type\Atomic\TBool) {
                         $good_types[] = new Type\Atomic\TLiteralInt(0);
                         $good_types[] = new Type\Atomic\TLiteralInt(1);
+                    } elseif ($atomic_key_type instanceof Type\Atomic\TLiteralFloat) {
+                        $good_types[] = new Type\Atomic\TLiteralInt((int) $atomic_key_type->value);
                     } elseif ($atomic_key_type instanceof Type\Atomic\TFloat) {
                         $good_types[] = new Type\Atomic\TInt;
                     } else {
@@ -229,11 +232,11 @@ class ArrayAnalyzer
         PhpParser\Node\Expr\ArrayItem $item,
         Codebase $codebase
     ) : void {
-        if (ExpressionAnalyzer::analyze($statements_analyzer, $item->value, $context) === false) {
-            return;
-        }
-
         if ($item->unpack) {
+            if (ExpressionAnalyzer::analyze($statements_analyzer, $item->value, $context) === false) {
+                return;
+            }
+
             $unpacked_array_type = $statements_analyzer->node_data->getType($item->value);
 
             if (!$unpacked_array_type) {
@@ -279,12 +282,12 @@ class ArrayAnalyzer
         $item_is_list_item = false;
 
         if ($item->key) {
-            $was_inside_use = $context->inside_use;
-            $context->inside_use = true;
+            $was_inside_general_use = $context->inside_general_use;
+            $context->inside_general_use = true;
             if (ExpressionAnalyzer::analyze($statements_analyzer, $item->key, $context) === false) {
                 return;
             }
-            $context->inside_use = $was_inside_use;
+            $context->inside_general_use = $was_inside_general_use;
 
             if ($item_key_type = $statements_analyzer->node_data->getType($item->key)) {
                 $key_type = $item_key_type;
@@ -330,6 +333,10 @@ class ArrayAnalyzer
             $item_is_list_item = true;
             $item_key_value = $array_creation_info->int_offset++;
             $array_creation_info->item_key_atomic_types[] = new Type\Atomic\TLiteralInt($item_key_value);
+        }
+
+        if (ExpressionAnalyzer::analyze($statements_analyzer, $item->value, $context) === false) {
+            return;
         }
 
         $array_creation_info->all_list = $array_creation_info->all_list && $item_is_list_item;

@@ -2,10 +2,9 @@
 namespace Psalm\Tests;
 
 use PHPUnit\Framework\TestCase as BaseTestCase;
-use Psalm\DocComment;
-use Psalm\Internal\RuntimeCaches;
-use Psalm\Internal\Scanner\ParsedDocblock;
+use Psalm\Exception\IncorrectDocblockException;
 use Psalm\Internal\PhpVisitor\Reflector\FunctionLikeDocblockParser;
+use Psalm\Internal\RuntimeCaches;
 
 class FunctionLikeDocblockParserTest extends BaseTestCase
 {
@@ -55,5 +54,47 @@ class FunctionLikeDocblockParserTest extends BaseTestCase
 
         $this->assertTrue(isset($function_docblock->params[1]['description']));
         $this->assertSame('The blah tags that has a very long multiline description.', $function_docblock->params[1]['description']);
+    }
+
+    public function testMisplacedVariableOnNextLine(): void
+    {
+        $doc = '/**
+ * @param
+ *          $p
+ */';
+        $php_parser_doc = new \PhpParser\Comment\Doc($doc);
+        $this->expectException(IncorrectDocblockException::class);
+        $this->expectExceptionMessage('Misplaced variable');
+        FunctionLikeDocblockParser::parse($php_parser_doc);
+    }
+
+    public function testPreferPsalmPrefixedAnnotationsOverPhpstanOnes(): void
+    {
+        $doc = '/**
+ * @psalm-template T of string
+ * @phpstan-template T of int
+ */
+';
+        $php_parser_doc = new \PhpParser\Comment\Doc($doc);
+        $function_docblock = FunctionLikeDocblockParser::parse($php_parser_doc);
+        $this->assertSame([['T', 'of', 'string', false]], $function_docblock->templates);
+    }
+
+    public function testReturnsUnexpectedTags(): void
+    {
+        $doc = '/**
+ * @psalm-import-type abcd
+ * @var int $p
+ */
+';
+        $php_parser_doc = new \PhpParser\Comment\Doc($doc, 0);
+        $function_docblock = FunctionLikeDocblockParser::parse($php_parser_doc);
+        $this->assertEquals(
+            [
+                'psalm-import-type' => ['lines' => [1]],
+                'var' => ['lines' => [2], 'suggested_replacement' => 'param'],
+            ],
+            $function_docblock->unexpected_tags
+        );
     }
 }

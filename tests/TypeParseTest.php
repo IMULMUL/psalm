@@ -1,20 +1,21 @@
 <?php
 namespace Psalm\Tests;
 
-use function function_exists;
-use function print_r;
-use function mb_substr;
-use function stripos;
-
+use Psalm\Internal\Provider\FakeFileProvider;
 use Psalm\Internal\RuntimeCaches;
 use Psalm\Type;
+
+use function function_exists;
+use function mb_substr;
+use function print_r;
+use function stripos;
 
 class TypeParseTest extends TestCase
 {
     public function setUp() : void
     {
         RuntimeCaches::clearAll();
-        $this->file_provider = new \Psalm\Tests\Internal\Provider\FakeFileProvider();
+        $this->file_provider = new FakeFileProvider();
 
         $config = new TestConfig();
 
@@ -900,9 +901,9 @@ class TypeParseTest extends TestCase
 
         $resolved_type = new Type\Union([
             new Type\Atomic\TLiteralString('baz'),
-            new Type\Atomic\TScalarClassConstant('One2', 'TWO_THREE'),
-            new Type\Atomic\TScalarClassConstant('Foo', 'BAR_BAR'),
-            new Type\Atomic\TScalarClassConstant('Bat\\Bar', 'BAZ_BAM'),
+            new Type\Atomic\TClassConstant('One2', 'TWO_THREE'),
+            new Type\Atomic\TClassConstant('Foo', 'BAR_BAR'),
+            new Type\Atomic\TClassConstant('Bat\\Bar', 'BAZ_BAM'),
         ]);
 
         $this->assertSame($resolved_type->getId(), $docblock_type->getId());
@@ -916,15 +917,15 @@ class TypeParseTest extends TestCase
 
         $docblock_type = Type::parseString('int-mask<1, 2, 4>');
 
-        $this->assertSame('1|2|3|4|5|6|7', $docblock_type->getId());
+        $this->assertSame('0|1|2|3|4|5|6|7', $docblock_type->getId());
 
         $docblock_type = Type::parseString('int-mask<1, 4>');
 
-        $this->assertSame('1|4|5', $docblock_type->getId());
+        $this->assertSame('0|1|4|5', $docblock_type->getId());
 
         $docblock_type = Type::parseString('int-mask<PREG_PATTERN_ORDER, PREG_OFFSET_CAPTURE, PREG_UNMATCHED_AS_NULL>');
 
-        $this->assertSame('1|256|257|512|513|768|769', $docblock_type->getId());
+        $this->assertSame('0|1|256|257|512|513|768|769', $docblock_type->getId());
     }
 
     public function testIntMaskWithClassConstant(): void
@@ -945,7 +946,7 @@ class TypeParseTest extends TestCase
     {
         $docblock_type = Type::parseString('int-mask-of<A::*>');
 
-        $this->assertSame('int-mask-of<scalar-class-constant(A::*)>', $docblock_type->getId());
+        $this->assertSame('int-mask-of<class-constant(A::*)>', $docblock_type->getId());
     }
 
     public function testIntMaskOfWithInvalidClassConstant(): void

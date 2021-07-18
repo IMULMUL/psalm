@@ -1,15 +1,10 @@
 <?php
 namespace Psalm\Internal\Codebase;
 
-use function array_pop;
-use function assert;
-use function count;
-use function explode;
 use PhpParser;
-use Psalm\Codebase;
 use Psalm\CodeLocation;
+use Psalm\Codebase;
 use Psalm\Context;
-use Psalm\Internal\Type\Comparator\UnionTypeComparator;
 use Psalm\Internal\MethodIdentifier;
 use Psalm\Internal\Provider\ClassLikeStorageProvider;
 use Psalm\Internal\Provider\FileReferenceProvider;
@@ -17,11 +12,17 @@ use Psalm\Internal\Provider\MethodExistenceProvider;
 use Psalm\Internal\Provider\MethodParamsProvider;
 use Psalm\Internal\Provider\MethodReturnTypeProvider;
 use Psalm\Internal\Provider\MethodVisibilityProvider;
+use Psalm\Internal\Type\Comparator\UnionTypeComparator;
 use Psalm\StatementsSource;
 use Psalm\Storage\ClassLikeStorage;
 use Psalm\Storage\FunctionLikeParameter;
 use Psalm\Storage\MethodStorage;
 use Psalm\Type;
+
+use function array_pop;
+use function assert;
+use function count;
+use function explode;
 use function reset;
 use function strtolower;
 
@@ -80,6 +81,9 @@ class Methods
 
     /**
      * Whether or not a given method exists
+     *
+     * If you pass true in $is_used argument the method return is considered used
+     *
      * @param lowercase-string|null $calling_method_id
      */
     public function methodExists(
@@ -88,7 +92,8 @@ class Methods
         ?CodeLocation $code_location = null,
         ?StatementsSource $source = null,
         ?string $source_file_path = null,
-        bool $use_method_existence_provider = true
+        bool $use_method_existence_provider = true,
+        bool $is_used = false
     ) : bool {
         $fq_class_name = $method_id->fq_class_name;
         $method_name = $method_id->method_name;
@@ -114,6 +119,10 @@ class Methods
             $class_storage = $this->classlike_storage_provider->get($fq_class_name);
         } catch (\InvalidArgumentException $e) {
             return false;
+        }
+
+        if ($class_storage->is_enum && $method_name === 'cases') {
+            return true;
         }
 
         $source_file_path = $source ? $source->getFilePath() : $source_file_path;
@@ -155,12 +164,14 @@ class Methods
                     if ($calling_method_id) {
                         $this->file_reference_provider->addMethodReferenceToClassMember(
                             $calling_method_id,
-                            $potential_id
+                            $potential_id,
+                            $is_used
                         );
                     } elseif ($source_file_path) {
                         $this->file_reference_provider->addFileReferenceToClassMember(
                             $source_file_path,
-                            $potential_id
+                            $potential_id,
+                            $is_used
                         );
                     }
                 }
@@ -168,12 +179,14 @@ class Methods
                 if ($calling_method_id) {
                     $this->file_reference_provider->addMethodReferenceToClassMember(
                         $calling_method_id,
-                        strtolower((string) $declaring_method_id)
+                        strtolower((string) $declaring_method_id),
+                        $is_used
                     );
                 } elseif ($source_file_path) {
                     $this->file_reference_provider->addFileReferenceToClassMember(
                         $source_file_path,
-                        strtolower((string) $declaring_method_id)
+                        strtolower((string) $declaring_method_id),
+                        $is_used
                     );
                 }
             }
@@ -198,12 +211,14 @@ class Methods
                 if ($calling_method_id) {
                     $this->file_reference_provider->addMethodReferenceToClassMember(
                         $calling_method_id,
-                        $interface_method_id_lc
+                        $interface_method_id_lc,
+                        $is_used
                     );
                 } elseif ($source_file_path) {
                     $this->file_reference_provider->addFileReferenceToClassMember(
                         $source_file_path,
-                        $interface_method_id_lc
+                        $interface_method_id_lc,
+                        $is_used
                     );
                 }
             }
@@ -228,12 +243,14 @@ class Methods
                         // also store failures in case the method is added later
                         $this->file_reference_provider->addMethodReferenceToClassMember(
                             $calling_method_id,
-                            strtolower((string) $overridden_method_id)
+                            strtolower((string) $overridden_method_id),
+                            $is_used
                         );
                     } elseif ($source_file_path) {
                         $this->file_reference_provider->addFileReferenceToClassMember(
                             $source_file_path,
-                            strtolower((string) $overridden_method_id)
+                            strtolower((string) $overridden_method_id),
+                            $is_used
                         );
                     }
                 }
@@ -668,6 +685,24 @@ class Methods
 
         $appearing_fq_class_storage = $this->classlike_storage_provider->get($appearing_fq_class_name);
 
+        if ($appearing_fq_class_name === 'UnitEnum'
+            && $original_method_name === 'cases'
+            && $original_class_storage->is_enum
+            && $original_class_storage->enum_cases
+        ) {
+            $types = [];
+
+            foreach ($original_class_storage->enum_cases as $case_name => $_) {
+                $types[] = new Type\Union([new Type\Atomic\TEnumCase($original_fq_class_name, $case_name)]);
+            }
+
+            $list = new Type\Atomic\TKeyedArray($types);
+            $list->is_list = true;
+            $list->sealed = true;
+
+            return new Type\Union([$list]);
+        }
+
         if (!$appearing_fq_class_storage->user_defined
             && !$appearing_fq_class_storage->stubbed
             && InternalCallMapHandler::inCallMap((string) $appearing_method_id)
@@ -1079,6 +1114,10 @@ class Methods
         $declaring_method_id = $this->getDeclaringMethodId($method_id);
 
         if (!$declaring_method_id) {
+            if (\Psalm\Internal\Codebase\InternalCallMapHandler::inCallMap((string) $method_id)) {
+                return null;
+            }
+
             throw new \UnexpectedValueException('$storage should not be null for ' . $method_id);
         }
 

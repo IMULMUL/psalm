@@ -2,12 +2,12 @@
 namespace Psalm\Internal\Analyzer\Statements\Expression\Call;
 
 use PhpParser;
-use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
-use Psalm\Internal\Analyzer\Statements\Expression\ExpressionIdentifier;
-use Psalm\Internal\Analyzer\StatementsAnalyzer;
-use Psalm\Internal\MethodIdentifier;
 use Psalm\CodeLocation;
 use Psalm\Context;
+use Psalm\Internal\Analyzer\Statements\Expression\ExpressionIdentifier;
+use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
+use Psalm\Internal\Analyzer\StatementsAnalyzer;
+use Psalm\Internal\MethodIdentifier;
 use Psalm\Issue\InvalidMethodCall;
 use Psalm\Issue\InvalidScope;
 use Psalm\Issue\NullReference;
@@ -23,9 +23,10 @@ use Psalm\Issue\UndefinedMethod;
 use Psalm\IssueBuffer;
 use Psalm\Type;
 use Psalm\Type\Atomic\TNamedObject;
+
+use function array_reduce;
 use function count;
 use function is_string;
-use function array_reduce;
 use function strtolower;
 
 /**
@@ -42,9 +43,6 @@ class MethodCallAnalyzer extends \Psalm\Internal\Analyzer\Statements\Expression\
         $was_inside_call = $context->inside_call;
 
         $context->inside_call = true;
-
-        $was_inside_use = $context->inside_use;
-        $context->inside_use = true;
 
         $existing_stmt_var_type = null;
 
@@ -69,7 +67,6 @@ class MethodCallAnalyzer extends \Psalm\Internal\Analyzer\Statements\Expression\
         }
 
         $context->inside_call = $was_inside_call;
-        $context->inside_use = $was_inside_use;
 
         if ($stmt->var instanceof PhpParser\Node\Expr\Variable) {
             if (is_string($stmt->var->name) && $stmt->var->name === 'this' && !$statements_analyzer->getFQCLN()) {
@@ -138,6 +135,7 @@ class MethodCallAnalyzer extends \Psalm\Internal\Analyzer\Statements\Expression\
             && $class_type->isNullable()
             && !$class_type->ignore_nullable_issues
             && !($stmt->name->name === 'offsetGet' && $context->inside_isset)
+            && !self::hasNullsafe($stmt->var)
         ) {
             if (IssueBuffer::accepts(
                 new PossiblyNullReference(
@@ -447,5 +445,17 @@ class MethodCallAnalyzer extends \Psalm\Internal\Analyzer\Statements\Expression\
         }
 
         return true;
+    }
+
+    public static function hasNullsafe(PhpParser\Node\Expr $expr) : bool
+    {
+        if ($expr instanceof PhpParser\Node\Expr\MethodCall
+            || $expr instanceof PhpParser\Node\Expr\PropertyFetch
+        ) {
+            return self::hasNullsafe($expr->var);
+        }
+
+        return $expr instanceof PhpParser\Node\Expr\NullsafeMethodCall
+            || $expr instanceof PhpParser\Node\Expr\NullsafePropertyFetch;
     }
 }

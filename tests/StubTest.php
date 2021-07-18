@@ -1,18 +1,21 @@
 <?php
 namespace Psalm\Tests;
 
-use function define;
-use function defined;
-use function dirname;
-use function getcwd;
-use function implode;
-use function explode;
-use const DIRECTORY_SEPARATOR;
 use Psalm\Config;
 use Psalm\Context;
 use Psalm\Internal\IncludeCollector;
+use Psalm\Internal\Provider\FakeFileProvider;
 use Psalm\Internal\RuntimeCaches;
 use Psalm\Tests\Internal\Provider;
+
+use function define;
+use function defined;
+use function dirname;
+use function explode;
+use function getcwd;
+use function implode;
+
+use const DIRECTORY_SEPARATOR;
 
 class StubTest extends TestCase
 {
@@ -24,7 +27,7 @@ class StubTest extends TestCase
         self::$config = new TestConfig();
 
         if (!defined('PSALM_VERSION')) {
-            define('PSALM_VERSION', '2.0.0');
+            define('PSALM_VERSION', '4.0.0');
         }
 
         if (!defined('PHP_PARSER_VERSION')) {
@@ -35,7 +38,7 @@ class StubTest extends TestCase
     public function setUp() : void
     {
         RuntimeCaches::clearAll();
-        $this->file_provider = new Provider\FakeFileProvider();
+        $this->file_provider = new FakeFileProvider();
     }
 
     private function getProjectAnalyzerWithConfig(Config $config): \Psalm\Internal\Analyzer\ProjectAnalyzer
@@ -1279,15 +1282,15 @@ class StubTest extends TestCase
             '<?php
                 use Doctrine\ORM\EntityManager;
 
-                interface I {}
+                class A {}
 
                 function em(EntityManager $em) : void {
-                    echo $em->getReference(I::class, 1);
+                    echo $em->getReference(A::class, 1);
                 }'
         );
 
         $this->expectException(\Psalm\Exception\CodeException::class);
-        $this->expectExceptionMessage('I|null');
+        $this->expectExceptionMessage('A|null');
 
         $this->analyzeFile($file_path, new Context());
     }

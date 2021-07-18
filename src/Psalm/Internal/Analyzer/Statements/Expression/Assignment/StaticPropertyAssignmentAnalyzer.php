@@ -2,15 +2,15 @@
 namespace Psalm\Internal\Analyzer\Statements\Expression\Assignment;
 
 use PhpParser;
-use Psalm\Internal\Analyzer\ClassAnalyzer;
-use Psalm\Internal\Analyzer\ClassLikeAnalyzer;
-use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
-use Psalm\Internal\Analyzer\Statements\Expression\ExpressionIdentifier;
-use Psalm\Internal\Analyzer\StatementsAnalyzer;
-use Psalm\Internal\Type\Comparator\UnionTypeComparator;
-use Psalm\Internal\FileManipulation\FileManipulationBuffer;
 use Psalm\CodeLocation;
 use Psalm\Context;
+use Psalm\Internal\Analyzer\ClassAnalyzer;
+use Psalm\Internal\Analyzer\ClassLikeAnalyzer;
+use Psalm\Internal\Analyzer\Statements\Expression\ExpressionIdentifier;
+use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
+use Psalm\Internal\Analyzer\StatementsAnalyzer;
+use Psalm\Internal\FileManipulation\FileManipulationBuffer;
+use Psalm\Internal\Type\Comparator\UnionTypeComparator;
 use Psalm\Issue\ImplicitToStringCast;
 use Psalm\Issue\InvalidPropertyAssignmentValue;
 use Psalm\Issue\MixedPropertyTypeCoercion;
@@ -19,8 +19,9 @@ use Psalm\Issue\PropertyTypeCoercion;
 use Psalm\Issue\UndefinedPropertyAssignment;
 use Psalm\IssueBuffer;
 use Psalm\Type;
-use function strtolower;
+
 use function explode;
+use function strtolower;
 
 /**
  * @internal
@@ -69,15 +70,15 @@ class StaticPropertyAssignmentAnalyzer
             $fq_class_name = $lhs_atomic_type->value;
 
             if (!$prop_name instanceof PhpParser\Node\Identifier) {
-                $was_inside_use = $context->inside_use;
+                $was_inside_general_use = $context->inside_general_use;
 
-                $context->inside_use = true;
+                $context->inside_general_use = true;
 
                 if (ExpressionAnalyzer::analyze($statements_analyzer, $prop_name, $context) === false) {
                     return false;
                 }
 
-                $context->inside_use = $was_inside_use;
+                $context->inside_general_use = $was_inside_general_use;
 
                 if (!$context->ignore_variable_property) {
                     $codebase->analyzer->addMixedMemberName(

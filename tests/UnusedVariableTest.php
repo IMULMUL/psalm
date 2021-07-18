@@ -1,12 +1,15 @@
 <?php
 namespace Psalm\Tests;
 
-use function preg_quote;
 use Psalm\Config;
 use Psalm\Context;
+use Psalm\Internal\Provider\FakeFileProvider;
 use Psalm\Internal\RuntimeCaches;
 use Psalm\Tests\Internal\Provider;
+
+use function preg_quote;
 use function strpos;
+
 use const DIRECTORY_SEPARATOR;
 
 class UnusedVariableTest extends TestCase
@@ -18,7 +21,7 @@ class UnusedVariableTest extends TestCase
     {
         RuntimeCaches::clearAll();
 
-        $this->file_provider = new Provider\FakeFileProvider();
+        $this->file_provider = new FakeFileProvider();
 
         $this->project_analyzer = new \Psalm\Internal\Analyzer\ProjectAnalyzer(
             new TestConfig(),
@@ -1529,6 +1532,7 @@ class UnusedVariableTest extends TestCase
                         takes_ref($a[$e]);
                     }
 
+                    /** @param array<string|int> $p */
                     function takes_ref(array &$p): void {
                         echo implode(",", $p);
                     }'
@@ -2365,6 +2369,69 @@ class UnusedVariableTest extends TestCase
                         }
                     }'
             ],
+            'concatWithUnknownProperty' => [
+                '<?php
+                    /** @param array<string> $key */
+                    function foo(object $a, string $k) : string {
+                        $sortA = "";
+
+                        /** @psalm-suppress MixedOperand */
+                        $sortA .= $a->$k;
+
+                        return $sortA;
+                    }'
+            ],
+            'varDocblockVariableIsUsedByRef' => [
+                '<?php
+                    /** @param array<string|int> $arr */
+                    function foo(array $arr) : string {
+                        /** @var string $val */
+                        foreach ($arr as &$val) {
+                            $val = urlencode($val);
+                        }
+                        return implode("/", $arr);
+                    }'
+            ],
+            'initVariableInOffset'  => [
+                '<?php
+                    $a = [
+                        $b = "b" => $b,
+                    ];
+
+                    foreach ($a as $key => $value) {
+                        echo $key . " " . $value;
+                    }',
+            ],
+            'intAndBitwiseNotOperator' => [
+                '<?php
+                    function foo() : int
+                    {
+                        $bitmask = 0x1;
+                        $bytes = 2;
+                        $ret = $bytes | ~$bitmask;
+                        return $ret;
+                    }'
+            ],
+            'stringAndBitwiseAndOperator' => [
+                '<?php
+                    function randomBits() : string
+                    {
+                        $bitmask = \chr(0xFF >> 1);
+
+                        $randomBytes    = random_bytes(1);
+                        $randomBytes[0] = $randomBytes[0] & $bitmask;
+
+                        return $randomBytes;
+                    }'
+            ],
+            'globalChangeValue' => [
+                '<?php
+                    function setProxySettingsFromEnv(): void {
+                        global $a;
+
+                        $a = false;
+                    }'
+            ],
         ];
     }
 
@@ -2944,7 +3011,7 @@ class UnusedVariableTest extends TestCase
                             $i = $i;
                         }
                     }',
-                'error_message' => 'UnusedVariable',
+                'error_message' => 'UnusedForeachValue',
             ],
             'detectUnusedVariableInsideLoopAfterAssignmentWithAddition' => [
                 '<?php
@@ -2953,7 +3020,7 @@ class UnusedVariableTest extends TestCase
                             $i = $i + 1;
                         }
                     }',
-                'error_message' => 'UnusedVariable',
+                'error_message' => 'UnusedForeachValue',
             ],
             'detectUnusedVariableInsideLoopCalledInFunction' => [
                 '<?php
@@ -3054,7 +3121,30 @@ class UnusedVariableTest extends TestCase
                         }
                         return 4;
                     }',
-                'error_message' => 'UnusedVariable',
+                'error_message' => 'UnusedForeachValue',
+            ],
+            'conditionalForeachWithUnusedValue' => [
+                '<?php
+                    if (rand(0, 1) > 0) {
+                        foreach ([1, 2, 3] as $val) {}
+                    }
+                ',
+                'error_message' => 'UnusedForeachValue',
+            ],
+            'doubleForeachWithInnerUnusedValue' => [
+                '<?php
+                    /**
+                     * @param non-empty-list<list<int>> $arr
+                     * @return list<int>
+                     */
+                    function f(array $arr): array {
+                        foreach ($arr as $elt) {
+                            foreach ($elt as $subelt) {}
+                        }
+                        return $elt;
+                    }
+                ',
+                'error_message' => 'UnusedForeachValue'
             ],
             'defineInBothBranchesOfConditional' => [
                 '<?php
@@ -3177,15 +3267,6 @@ class UnusedVariableTest extends TestCase
                     return function () use ($data) {
                         $data[] = 1;
                     };',
-                'error_message' => 'UnusedVariable',
-            ],
-            'globalVariableUsage' => [
-                '<?php
-                    $a = "hello";
-                    function example() : void {
-                        global $a;
-                    }
-                    example();',
                 'error_message' => 'UnusedVariable',
             ],
             'warnAboutOriginalBadArray' => [

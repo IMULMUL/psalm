@@ -184,6 +184,25 @@ class ToStringTest extends TestCase
                 [],
                 '8.0',
             ],
+            'toStringNever' => [
+                '<?php
+                    class B{
+                        public function __toString() {
+                            throw new BadMethodCallException("bad");
+                        }
+                    }
+                '
+            ],
+            'toStringToImplode' => [
+                '<?php
+                    class Bar {
+                        public function __toString() {
+                            return "foo";
+                        }
+                    }
+
+                    echo implode(":", [new Bar()]);',
+            ],
         ];
     }
 

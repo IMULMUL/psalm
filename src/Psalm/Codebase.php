@@ -1,28 +1,16 @@
 <?php
 namespace Psalm;
 
-use Psalm\Internal\Analyzer\StatementsAnalyzer;
-use function array_combine;
-use function array_merge;
-use function count;
-use function error_log;
-use function explode;
-use function in_array;
-use function krsort;
-use function ksort;
 use LanguageServerProtocol\Command;
 use LanguageServerProtocol\Position;
 use LanguageServerProtocol\Range;
-use const PHP_MAJOR_VERSION;
-use const PHP_MINOR_VERSION;
 use PhpParser;
-use function preg_match;
-use Psalm\Internal\Analyzer\ProjectAnalyzer;
 use Psalm\Internal\Analyzer\NamespaceAnalyzer;
+use Psalm\Internal\Analyzer\ProjectAnalyzer;
 use Psalm\Internal\Analyzer\Statements\Block\ForeachAnalyzer;
 use Psalm\Internal\Analyzer\Statements\Expression\Fetch\ConstFetchAnalyzer;
 use Psalm\Internal\Analyzer\Statements\Expression\Fetch\VariableFetchAnalyzer;
-use Psalm\Internal\Type\Comparator\UnionTypeComparator;
+use Psalm\Internal\Analyzer\StatementsAnalyzer;
 use Psalm\Internal\Codebase\InternalCallMapHandler;
 use Psalm\Internal\Provider\ClassLikeStorageProvider;
 use Psalm\Internal\Provider\FileProvider;
@@ -30,22 +18,36 @@ use Psalm\Internal\Provider\FileReferenceProvider;
 use Psalm\Internal\Provider\FileStorageProvider;
 use Psalm\Internal\Provider\Providers;
 use Psalm\Internal\Provider\StatementsProvider;
+use Psalm\Internal\Type\Comparator\UnionTypeComparator;
 use Psalm\Progress\Progress;
 use Psalm\Progress\VoidProgress;
 use Psalm\Storage\ClassLikeStorage;
 use Psalm\Storage\FileStorage;
 use Psalm\Storage\FunctionLikeStorage;
+
+use function array_combine;
+use function array_merge;
+use function array_pop;
+use function array_reverse;
+use function count;
+use function dirname;
+use function error_log;
+use function explode;
+use function implode;
+use function in_array;
 use function is_string;
+use function krsort;
+use function ksort;
+use function preg_match;
 use function strlen;
 use function strpos;
 use function strrpos;
 use function strtolower;
 use function substr;
 use function substr_count;
-use function array_pop;
-use function implode;
-use function array_reverse;
-use function dirname;
+
+use const PHP_MAJOR_VERSION;
+use const PHP_MINOR_VERSION;
 
 class Codebase
 {
@@ -645,6 +647,23 @@ class Codebase
         );
     }
 
+    /**
+     * Check whether a class/interface exists
+     */
+    public function classOrInterfaceOrEnumExists(
+        string $fq_class_name,
+        ?CodeLocation $code_location = null,
+        ?string $calling_fq_class_name = null,
+        ?string $calling_method_id = null
+    ): bool {
+        return $this->classlikes->classOrInterfaceOrEnumExists(
+            $fq_class_name,
+            $code_location,
+            $calling_fq_class_name,
+            $calling_method_id
+        );
+    }
+
     public function classExtendsOrImplements(string $fq_class_name, string $possible_parent): bool
     {
         return $this->classlikes->classExtends($fq_class_name, $possible_parent)
@@ -777,14 +796,17 @@ class Codebase
         $method_id,
         ?CodeLocation $code_location = null,
         $calling_method_id = null,
-        ?string $file_path = null
+        ?string $file_path = null,
+        bool $is_used = true
     ): bool {
         return $this->methods->methodExists(
             Internal\MethodIdentifier::wrap($method_id),
             is_string($calling_method_id) ? strtolower($calling_method_id) : strtolower((string) $calling_method_id),
             $code_location,
             null,
-            $file_path
+            $file_path,
+            true,
+            $is_used
         );
     }
 
@@ -1749,7 +1771,7 @@ class Codebase
                     null,
                     (string) $atomic_type->value
                 );
-            } elseif ($atomic_type instanceof Type\Atomic\TScalarClassConstant) {
+            } elseif ($atomic_type instanceof Type\Atomic\TClassConstant) {
                 $const = $atomic_type->fq_classlike_name . '::' . $atomic_type->const_name;
                 $completion_items[] = new \LanguageServerProtocol\CompletionItem(
                     $const,

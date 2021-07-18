@@ -2,9 +2,11 @@
 namespace Psalm\Tests\FileManipulation;
 
 use Psalm\Context;
+use Psalm\Internal\Provider\FakeFileProvider;
 use Psalm\Internal\RuntimeCaches;
 use Psalm\Tests\Internal\Provider;
 use Psalm\Tests\TestConfig;
+
 use function strpos;
 
 class NamespaceMoveTest extends \Psalm\Tests\TestCase
@@ -16,7 +18,7 @@ class NamespaceMoveTest extends \Psalm\Tests\TestCase
     {
         RuntimeCaches::clearAll();
 
-        $this->file_provider = new Provider\FakeFileProvider();
+        $this->file_provider = new FakeFileProvider();
     }
 
     /**

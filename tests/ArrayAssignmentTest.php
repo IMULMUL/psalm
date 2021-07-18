@@ -822,6 +822,7 @@ class ArrayAssignmentTest extends TestCase
                          * @psalm-suppress InvalidArrayOffset
                          * @psalm-suppress MixedOperand
                          * @psalm-suppress PossiblyUndefinedArrayOffset
+                         * @psalm-suppress MixedAssignment
                          */
                         $a["b"]["d"] += $a["b"][$i];
                     }',
@@ -1045,20 +1046,6 @@ class ArrayAssignmentTest extends TestCase
 
                     $c = new C();
                     $c[] = "hello";',
-            ],
-            'addToMixedArray' => [
-                '<?php
-                    /**
-                     * @param array{key: string} $a
-                     */
-                    function foo(array $a): void {
-                        echo $a["key"];
-                    }
-
-                    function bar(array $arr) : void {
-                        $arr["key"] = "qqq";
-                        foo($arr);
-                    }'
             ],
             'checkEmptinessAfterConditionalArrayAdjustment' => [
                 '<?php
@@ -1567,6 +1554,62 @@ class ArrayAssignmentTest extends TestCase
                     [$key => 123];
                 }',
             ],
+            'assignStringIndexed' => [
+                '<?php
+                    /**
+                     * @param array<string, mixed> $array
+                     * @return non-empty-array<string, mixed>
+                     */
+                    function getArray(array $array): array {
+                        if (rand(0, 1)) {
+                            $array["a"] = 2;
+                        } else {
+                            $array["b"] = 1;
+                        }
+                        return $array;
+                    }'
+            ],
+            'castPossiblyArray'  => [
+                '<?php
+                    /**
+                     * @psalm-param string|list<string> $a
+                     * @return list<string>
+                     */
+                    function addHeaders($a): array {
+                        return (array)$a;
+                    }',
+            ],
+            'ClassConstantAsKey'  => [
+                '<?php
+                    /**
+                     * @property Foo::C_* $aprop
+                     */
+                    class Foo {
+                        public const C_ONE = 1;
+                        public const C_TWO = 2;
+
+                        public function __get(string $prop) {
+                            if ($prop === "aprop")
+                                return self::C_ONE;
+                            throw new \RuntimeException("Unsupported property: $prop");
+                        }
+
+                        /** @return array<Foo::C_*, string> */
+                        public static function getNames(): array {
+                            return [
+                                self::C_ONE => "One",
+                                self::C_TWO => "Two",
+                            ];
+                        }
+
+                        public function getThisName(): string {
+                            $names = self::getNames();
+                            $aprop = $this->aprop;
+
+                            return $names[$aprop];
+                        }
+                    }',
+            ],
         ];
     }
 
@@ -1977,6 +2020,22 @@ class ArrayAssignmentTest extends TestCase
                         echo $array[0];
                         return $array;
                     }',
+                'error_message' => 'InvalidArrayOffset'
+            ],
+            'TemplateAsKey' => [
+                '<?php
+
+                class Foo {
+
+                    /**
+                     * @psalm-template T of array
+                     * @param T $offset
+                     * @param array<array, string> $weird_array
+                     */
+                    public function getThisName($offset, $weird_array): string {
+                        return $weird_array[$offset];
+                    }
+                }',
                 'error_message' => 'InvalidArrayOffset'
             ],
         ];

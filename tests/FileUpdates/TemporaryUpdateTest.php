@@ -1,16 +1,19 @@
 <?php
 namespace Psalm\Tests\FileUpdates;
 
-use function array_keys;
-use function array_shift;
-use function count;
-use const DIRECTORY_SEPARATOR;
-use function end;
-use function getcwd;
 use Psalm\Internal\Analyzer\ProjectAnalyzer;
+use Psalm\Internal\Provider\FakeFileProvider;
 use Psalm\Internal\Provider\Providers;
 use Psalm\Tests\Internal\Provider;
 use Psalm\Tests\TestConfig;
+
+use function array_keys;
+use function array_shift;
+use function count;
+use function end;
+use function getcwd;
+
+use const DIRECTORY_SEPARATOR;
 
 class TemporaryUpdateTest extends \Psalm\Tests\TestCase
 {
@@ -18,7 +21,7 @@ class TemporaryUpdateTest extends \Psalm\Tests\TestCase
     {
         parent::setUp();
 
-        $this->file_provider = new \Psalm\Tests\Internal\Provider\FakeFileProvider();
+        $this->file_provider = new FakeFileProvider();
 
         $config = new TestConfig();
         $config->throw_exception = false;

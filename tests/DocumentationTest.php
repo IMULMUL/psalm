@@ -9,6 +9,7 @@ use PHPUnit\Framework\Constraint\Constraint;
 use Psalm\Config;
 use Psalm\Context;
 use Psalm\DocComment;
+use Psalm\Internal\Provider\FakeFileProvider;
 use Psalm\Internal\RuntimeCaches;
 use Psalm\Tests\Internal\Provider;
 
@@ -25,8 +26,8 @@ use function implode;
 use function in_array;
 use function preg_quote;
 use function sort;
-use function strpos;
 use function str_replace;
+use function strpos;
 use function substr;
 use function trim;
 use function var_export;
@@ -53,7 +54,7 @@ class DocumentationTest extends TestCase
         '@psalm-self-out', // I'm fairly sure it's intentionally undocumented, but can't find the reference
         '@psalm-variadic',
     ];
-    
+
     /**
      * These should be documented
      */
@@ -125,7 +126,7 @@ class DocumentationTest extends TestCase
     {
         RuntimeCaches::clearAll();
 
-        $this->file_provider = new Provider\FakeFileProvider();
+        $this->file_provider = new FakeFileProvider();
 
         $this->project_analyzer = new \Psalm\Internal\Analyzer\ProjectAnalyzer(
             new TestConfig(),
@@ -179,6 +180,7 @@ class DocumentationTest extends TestCase
         $code_blocks['TaintedCustom'] = true;
         $code_blocks['ComplexFunction'] = true;
         $code_blocks['ComplexMethod'] = true;
+        $code_blocks['ConfigIssue'] = true;
 
         $documented_issues = array_keys($code_blocks);
         sort($documented_issues);

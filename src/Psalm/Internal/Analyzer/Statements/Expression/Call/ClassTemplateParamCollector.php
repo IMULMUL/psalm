@@ -6,12 +6,12 @@ use Psalm\Internal\Type\TypeExpander;
 use Psalm\Storage\ClassLikeStorage;
 use Psalm\Type;
 use Psalm\Type\Atomic;
+use Psalm\Type\Atomic\TClassConstant;
 use Psalm\Type\Atomic\TGenericObject;
-use Psalm\Type\Atomic\TScalarClassConstant;
 
+use function array_keys;
 use function array_merge;
 use function array_search;
-use function array_keys;
 
 class ClassTemplateParamCollector
 {
@@ -253,7 +253,7 @@ class ClassTemplateParamCollector
                         $static_template_types
                     )
                 );
-            } elseif ($type_extends_atomic instanceof TScalarClassConstant) {
+            } elseif ($type_extends_atomic instanceof TClassConstant) {
                 $expanded = TypeExpander::expandAtomic(
                     $codebase,
                     $type_extends_atomic,

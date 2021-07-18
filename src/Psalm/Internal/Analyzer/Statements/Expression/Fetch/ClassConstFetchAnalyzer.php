@@ -2,28 +2,30 @@
 namespace Psalm\Internal\Analyzer\Statements\Expression\Fetch;
 
 use PhpParser;
+use Psalm\CodeLocation;
+use Psalm\Context;
 use Psalm\Internal\Analyzer\ClassLikeAnalyzer;
+use Psalm\Internal\Analyzer\ClassLikeNameOptions;
 use Psalm\Internal\Analyzer\NamespaceAnalyzer;
 use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
 use Psalm\Internal\Analyzer\StatementsAnalyzer;
 use Psalm\Internal\Analyzer\TraitAnalyzer;
 use Psalm\Internal\FileManipulation\FileManipulationBuffer;
-use Psalm\CodeLocation;
-use Psalm\Context;
 use Psalm\Issue\CircularReference;
 use Psalm\Issue\DeprecatedClass;
 use Psalm\Issue\DeprecatedConstant;
-use Psalm\Issue\InternalClass;
 use Psalm\Issue\InaccessibleClassConstant;
+use Psalm\Issue\InternalClass;
 use Psalm\Issue\NonStaticSelfCall;
 use Psalm\Issue\ParentNotFound;
 use Psalm\Issue\UndefinedConstant;
 use Psalm\IssueBuffer;
 use Psalm\Type;
 use Psalm\Type\Atomic\TNamedObject;
+
 use function array_values;
-use function strtolower;
 use function explode;
+use function strtolower;
 
 /**
  * @internal
@@ -89,8 +91,7 @@ class ClassConstFetchAnalyzer
                             $context->self,
                             $context->calling_method_id,
                             $statements_analyzer->getSuppressedIssues(),
-                            false,
-                            true
+                            new ClassLikeNameOptions(false, true)
                         ) === false) {
                             return true;
                         }
@@ -166,7 +167,7 @@ class ClassConstFetchAnalyzer
             }
 
             // if we're ignoring that the class doesn't exist, exit anyway
-            if (!$codebase->classlikes->classOrInterfaceExists($fq_class_name)) {
+            if (!$codebase->classlikes->classOrInterfaceOrEnumExists($fq_class_name)) {
                 $statements_analyzer->node_data->setType($stmt, Type::getMixed());
 
                 return true;
@@ -200,43 +201,55 @@ class ClassConstFetchAnalyzer
                 );
             }
 
-            if ($fq_class_name === $context->self
-                || (
-                    $statements_analyzer->getSource()->getSource() instanceof TraitAnalyzer &&
-                    $fq_class_name === $statements_analyzer->getSource()->getFQCLN()
-                )
-            ) {
-                $class_visibility = \ReflectionProperty::IS_PRIVATE;
-            } elseif ($context->self &&
-                ($codebase->classlikes->classExtends($context->self, $fq_class_name)
-                    || $codebase->classlikes->classExtends($fq_class_name, $context->self))
-            ) {
-                $class_visibility = \ReflectionProperty::IS_PROTECTED;
-            } else {
-                $class_visibility = \ReflectionProperty::IS_PUBLIC;
-            }
+            $const_class_storage = $codebase->classlike_storage_provider->get($fq_class_name);
 
-            try {
-                $class_constant_type = $codebase->classlikes->getClassConstantType(
-                    $fq_class_name,
-                    $stmt->name->name,
-                    $class_visibility,
-                    $statements_analyzer
-                );
-            } catch (\InvalidArgumentException $_) {
-                return true;
-            } catch (\Psalm\Exception\CircularReferenceException $e) {
-                if (IssueBuffer::accepts(
-                    new CircularReference(
-                        'Constant ' . $const_id . ' contains a circular reference',
-                        new CodeLocation($statements_analyzer->getSource(), $stmt)
-                    ),
-                    $statements_analyzer->getSuppressedIssues()
-                )) {
-                    // fall through
+            if ($const_class_storage->is_enum) {
+                if (isset($const_class_storage->enum_cases[$stmt->name->name])) {
+                    $class_constant_type = new Type\Union([
+                        new Type\Atomic\TEnumCase($fq_class_name, $stmt->name->name)
+                    ]);
+                } else {
+                    $class_constant_type = null;
+                }
+            } else {
+                if ($fq_class_name === $context->self
+                    || (
+                        $statements_analyzer->getSource()->getSource() instanceof TraitAnalyzer &&
+                        $fq_class_name === $statements_analyzer->getSource()->getFQCLN()
+                    )
+                ) {
+                    $class_visibility = \ReflectionProperty::IS_PRIVATE;
+                } elseif ($context->self &&
+                    ($codebase->classlikes->classExtends($context->self, $fq_class_name)
+                        || $codebase->classlikes->classExtends($fq_class_name, $context->self))
+                ) {
+                    $class_visibility = \ReflectionProperty::IS_PROTECTED;
+                } else {
+                    $class_visibility = \ReflectionProperty::IS_PUBLIC;
                 }
 
-                return true;
+                try {
+                    $class_constant_type = $codebase->classlikes->getClassConstantType(
+                        $fq_class_name,
+                        $stmt->name->name,
+                        $class_visibility,
+                        $statements_analyzer
+                    );
+                } catch (\InvalidArgumentException $_) {
+                    return true;
+                } catch (\Psalm\Exception\CircularReferenceException $e) {
+                    if (IssueBuffer::accepts(
+                        new CircularReference(
+                            'Constant ' . $const_id . ' contains a circular reference',
+                            new CodeLocation($statements_analyzer->getSource(), $stmt)
+                        ),
+                        $statements_analyzer->getSuppressedIssues()
+                    )) {
+                        // fall through
+                    }
+
+                    return true;
+                }
             }
 
             if (!$class_constant_type) {
@@ -277,7 +290,8 @@ class ClassConstFetchAnalyzer
             if ($context->calling_method_id) {
                 $codebase->file_reference_provider->addMethodReferenceToClassMember(
                     $context->calling_method_id,
-                    strtolower($fq_class_name) . '::' . $stmt->name->name
+                    strtolower($fq_class_name) . '::' . $stmt->name->name,
+                    false
                 );
             }
 
@@ -314,8 +328,6 @@ class ClassConstFetchAnalyzer
                 }
             }
 
-            $const_class_storage = $codebase->classlike_storage_provider->get($fq_class_name);
-
             if ($context->self
                 && !$context->collect_initializations
                 && !$context->collect_mutations
@@ -346,7 +358,9 @@ class ClassConstFetchAnalyzer
                 )) {
                     // fall through
                 }
-            } elseif ($const_class_storage->constants[$stmt->name->name]->deprecated) {
+            } elseif (isset($const_class_storage->constants[$stmt->name->name])
+                && $const_class_storage->constants[$stmt->name->name]->deprecated
+            ) {
                 if (IssueBuffer::accepts(
                     new DeprecatedConstant(
                         'Constant ' . $const_id . ' is deprecated',
@@ -371,10 +385,10 @@ class ClassConstFetchAnalyzer
         }
 
         if ($stmt->name instanceof PhpParser\Node\Identifier && $stmt->name->name === 'class') {
-            $was_inside_use = $context->inside_use;
-            $context->inside_use = true;
+            $was_inside_general_use = $context->inside_general_use;
+            $context->inside_general_use = true;
             ExpressionAnalyzer::analyze($statements_analyzer, $stmt->class, $context);
-            $context->inside_use = $was_inside_use;
+            $context->inside_general_use = $was_inside_general_use;
 
             $lhs_type = $statements_analyzer->node_data->getType($stmt->class);
 
@@ -429,14 +443,14 @@ class ClassConstFetchAnalyzer
 
         $statements_analyzer->node_data->setType($stmt, Type::getMixed());
 
-        $was_inside_use = $context->inside_use;
-        $context->inside_use = true;
+        $was_inside_general_use = $context->inside_general_use;
+        $context->inside_general_use = true;
 
         if (ExpressionAnalyzer::analyze($statements_analyzer, $stmt->class, $context) === false) {
             return false;
         }
 
-        $context->inside_use = $was_inside_use;
+        $context->inside_general_use = $was_inside_general_use;
 
         return true;
     }

@@ -1,13 +1,8 @@
 <?php
 namespace Psalm\Type;
 
-use function array_filter;
-use function array_values;
-use function count;
-use function get_class;
-use function implode;
-use Psalm\Codebase;
 use Psalm\CodeLocation;
+use Psalm\Codebase;
 use Psalm\Internal\Type\TypeCombiner;
 use Psalm\StatementsSource;
 use Psalm\Storage\FileStorage;
@@ -20,11 +15,18 @@ use Psalm\Type\Atomic\TLiteralString;
 use Psalm\Type\Atomic\TNamedObject;
 use Psalm\Type\Atomic\TString;
 use Psalm\Type\Atomic\TTemplateParam;
+
+use function array_filter;
+use function array_merge;
+use function array_unique;
+use function array_values;
+use function count;
+use function get_class;
+use function implode;
 use function reset;
 use function sort;
 use function strpos;
 use function strval;
-use function array_unique;
 
 class Union implements TypeNode
 {
@@ -426,29 +428,44 @@ class Union implements TypeNode
         ?string $this_class,
         bool $use_phpdoc_format
     ): string {
-        $types = [];
+        $other_types = [];
 
-        $multi_ints = count($this->literal_int_types) > 1
-            || $this->hasPositiveInt();
-        $multi_strings = count($this->literal_string_types) > 1;
-        $multi_floats = count($this->literal_float_types) > 1;
+        $literal_ints = [];
+        $literal_strings = [];
+
+        $has_non_literal_int = false;
+        $has_non_literal_string = false;
 
         foreach ($this->types as $type) {
-            if ($type instanceof TLiteralInt && !$multi_ints) {
-                $type_string = 'int';
-            } elseif ($type instanceof TLiteralFloat && !$multi_floats) {
-                $type_string = 'float';
-            } elseif ($type instanceof TLiteralString && !$multi_strings) {
-                $type_string = 'string';
+            $type_string = $type->toNamespacedString($namespace, $aliased_classes, $this_class, $use_phpdoc_format);
+            if ($type instanceof TLiteralInt) {
+                $literal_ints[] = $type_string;
+            } elseif ($type instanceof TLiteralString) {
+                $literal_strings[] = $type_string;
             } else {
-                $type_string = $type->toNamespacedString($namespace, $aliased_classes, $this_class, $use_phpdoc_format);
+                if (get_class($type) === TString::class) {
+                    $has_non_literal_string = true;
+                } elseif (get_class($type) === TInt::class) {
+                    $has_non_literal_int = true;
+                }
+                $other_types[] = $type_string;
             }
-
-            $types[] = $type_string;
         }
 
-        sort($types);
-        return implode('|', \array_unique($types));
+        if (count($literal_ints) <= 3 && !$has_non_literal_int) {
+            $other_types = array_merge($other_types, $literal_ints);
+        } else {
+            $other_types[] = 'int';
+        }
+
+        if (count($literal_strings) <= 3 && !$has_non_literal_string) {
+            $other_types = array_merge($other_types, $literal_strings);
+        } else {
+            $other_types[] = 'string';
+        }
+
+        sort($other_types);
+        return implode('|', \array_unique($other_types));
     }
 
     /**
@@ -616,13 +633,6 @@ class Union implements TypeNode
                     }
                 )
             ) === 1;
-    }
-
-    public function hasEmptyArray(): bool
-    {
-        return isset($this->types['array'])
-            && $this->types['array'] instanceof Atomic\TArray
-            && $this->types['array']->type_params[1]->isEmpty();
     }
 
     public function hasArrayAccessInterface(Codebase $codebase) : bool
@@ -1223,6 +1233,24 @@ class Union implements TypeNode
         return true;
     }
 
+    public function allLiterals() : bool
+    {
+        foreach ($this->types as $atomic_key_type) {
+            if (!$atomic_key_type instanceof TLiteralString
+                && !$atomic_key_type instanceof TLiteralInt
+                && !$atomic_key_type instanceof TLiteralFloat
+                && !$atomic_key_type instanceof Atomic\TNonspecificLiteralString
+                && !$atomic_key_type instanceof Atomic\TNonspecificLiteralInt
+                && !$atomic_key_type instanceof Atomic\TFalse
+                && !$atomic_key_type instanceof Atomic\TTrue
+            ) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public function hasLiteralValue() : bool
     {
         return $this->literal_int_types
@@ -1331,6 +1359,15 @@ class Union implements TypeNode
         return $classlike_visitor->matches();
     }
 
+    public function containsAnyLiteral() : bool
+    {
+        $literal_visitor = new \Psalm\Internal\TypeVisitor\ContainsLiteralVisitor();
+
+        $literal_visitor->traverseArray($this->types);
+
+        return $literal_visitor->matches();
+    }
+
     /**
      * @return list<TTemplateParam>
      */
@@ -1360,7 +1397,7 @@ class Union implements TypeNode
         }
     }
 
-    public function equals(Union $other_type): bool
+    public function equals(Union $other_type, bool $ensure_source_equality = true): bool
     {
         if ($other_type === $this) {
             return true;
@@ -1390,7 +1427,7 @@ class Union implements TypeNode
             return false;
         }
 
-        if ($this->from_docblock !== $other_type->from_docblock) {
+        if ($ensure_source_equality && $this->from_docblock !== $other_type->from_docblock) {
             return false;
         }
 
@@ -1413,7 +1450,7 @@ class Union implements TypeNode
                 return false;
             }
 
-            if (!$atomic_type->equals($other_atomic_types[$key])) {
+            if (!$atomic_type->equals($other_atomic_types[$key], $ensure_source_equality)) {
                 return false;
             }
         }

@@ -4,16 +4,18 @@ namespace Psalm\Internal\PhpVisitor\Reflector;
 
 use PhpParser;
 use Psalm\Aliases;
-use Psalm\Codebase;
 use Psalm\CodeLocation;
+use Psalm\Codebase;
 use Psalm\Config;
 use Psalm\Exception\InvalidMethodOverrideException;
 use Psalm\Exception\TypeParseTreeException;
 use Psalm\Internal\Scanner\FileScanner;
+use Psalm\Internal\Scanner\FunctionDocblockComment;
 use Psalm\Internal\Type\TypeAlias;
 use Psalm\Internal\Type\TypeParser;
 use Psalm\Internal\Type\TypeTokenizer;
 use Psalm\Issue\InvalidDocblock;
+use Psalm\Issue\PossiblyInvalidDocblockTag;
 use Psalm\Storage\ClassLikeStorage;
 use Psalm\Storage\FileStorage;
 use Psalm\Storage\FunctionLikeParameter;
@@ -50,11 +52,13 @@ class FunctionLikeDocblockScanner
         array $existing_function_template_types,
         FunctionLikeStorage $storage,
         PhpParser\Node\FunctionLike $stmt,
-        \Psalm\Internal\Scanner\FunctionDocblockComment $docblock_info,
+        FunctionDocblockComment $docblock_info,
         bool $is_functionlike_override,
         bool $fake_method,
         string $cased_function_id
     ) : void {
+        self::handleUnexpectedTags($docblock_info, $storage, $stmt, $file_scanner, $cased_function_id);
+
         $config = Config::getInstance();
 
         if ($docblock_info->mutation_free) {
@@ -548,7 +552,7 @@ class FunctionLikeDocblockScanner
 
         foreach ($namespaced_type->getAtomicTypes() as $namespaced_type_part) {
             if ($namespaced_type_part instanceof Type\Atomic\TAssertionFalsy
-                || $namespaced_type_part instanceof Type\Atomic\TScalarClassConstant
+                || $namespaced_type_part instanceof Type\Atomic\TClassConstant
                 || ($namespaced_type_part instanceof Type\Atomic\TList
                     && $namespaced_type_part->type_param->isMixed())
                 || ($namespaced_type_part instanceof Type\Atomic\TArray
@@ -674,7 +678,7 @@ class FunctionLikeDocblockScanner
                     null
                 );
 
-                $storage->params[] = $storage_param;
+                $storage->addParam($storage_param);
             }
 
             try {
@@ -1322,5 +1326,29 @@ class FunctionLikeDocblockScanner
         }
 
         return array_merge($template_types ?: [], $storage->template_types);
+    }
+
+    private static function handleUnexpectedTags(
+        FunctionDocblockComment $docblock_info,
+        FunctionLikeStorage $storage,
+        PhpParser\Node\FunctionLike $stmt,
+        FileScanner $file_scanner,
+        string $cased_function_id
+    ): void {
+        foreach ($docblock_info->unexpected_tags as $tag => $details) {
+            foreach ($details['lines'] as $line) {
+                $tag_location = new CodeLocation($file_scanner, $stmt, null, true);
+                $tag_location->setCommentLine($line);
+
+                $message = 'Docblock tag @' . $tag . ' is not recognized in the function docblock '
+                    . 'for ' . $cased_function_id;
+
+                if (isset($details['suggested_replacement'])) {
+                    $message .= ', did you mean to use @' . $details['suggested_replacement'] . '?';
+                }
+
+                $storage->docblock_issues[] = new PossiblyInvalidDocblockTag($message, $tag_location);
+            }
+        }
     }
 }

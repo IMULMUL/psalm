@@ -1,9 +1,9 @@
 <?php
 namespace Psalm\Tests\LanguageServer;
 
-use LanguageServerProtocol\Position;
 use Psalm\Context;
 use Psalm\Internal\Analyzer\ProjectAnalyzer;
+use Psalm\Internal\Provider\FakeFileProvider;
 use Psalm\Internal\Provider\Providers;
 use Psalm\Tests\Internal\Provider;
 use Psalm\Tests\TestConfig;
@@ -14,7 +14,7 @@ class FileMapTest extends \Psalm\Tests\TestCase
     {
         parent::setUp();
 
-        $this->file_provider = new \Psalm\Tests\Internal\Provider\FakeFileProvider();
+        $this->file_provider = new FakeFileProvider();
 
         $config = new TestConfig();
 

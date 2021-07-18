@@ -2,26 +2,26 @@
 namespace Psalm\Internal\Analyzer\Statements\Expression\Call;
 
 use PhpParser;
+use Psalm\CodeLocation;
 use Psalm\Codebase;
-use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
+use Psalm\Context;
 use Psalm\Internal\Analyzer\Statements\Expression\AssignmentAnalyzer;
 use Psalm\Internal\Analyzer\Statements\Expression\CallAnalyzer;
 use Psalm\Internal\Analyzer\Statements\Expression\ExpressionIdentifier;
 use Psalm\Internal\Analyzer\Statements\Expression\Fetch\ArrayFetchAnalyzer;
+use Psalm\Internal\Analyzer\Statements\ExpressionAnalyzer;
 use Psalm\Internal\Analyzer\StatementsAnalyzer;
 use Psalm\Internal\Codebase\InternalCallMapHandler;
 use Psalm\Internal\Codebase\TaintFlowGraph;
 use Psalm\Internal\DataFlow\TaintSink;
+use Psalm\Internal\MethodIdentifier;
 use Psalm\Internal\Stubs\Generator\StubsGenerator;
 use Psalm\Internal\Type\Comparator\UnionTypeComparator;
-use Psalm\Internal\MethodIdentifier;
+use Psalm\Internal\Type\TemplateInferredTypeReplacer;
 use Psalm\Internal\Type\TemplateResult;
 use Psalm\Internal\Type\TemplateStandinTypeReplacer;
-use Psalm\Internal\Type\TemplateInferredTypeReplacer;
-use Psalm\CodeLocation;
-use Psalm\Context;
-use Psalm\Issue\InvalidPassByReference;
 use Psalm\Issue\InvalidNamedArgument;
+use Psalm\Issue\InvalidPassByReference;
 use Psalm\Issue\PossiblyUndefinedVariable;
 use Psalm\Issue\TooFewArguments;
 use Psalm\Issue\TooManyArguments;
@@ -31,16 +31,18 @@ use Psalm\Storage\ClassLikeStorage;
 use Psalm\Storage\FunctionLikeParameter;
 use Psalm\Storage\FunctionLikeStorage;
 use Psalm\Type;
-use Psalm\Type\Atomic\TKeyedArray;
 use Psalm\Type\Atomic\TArray;
+use Psalm\Type\Atomic\TKeyedArray;
 use Psalm\Type\Atomic\TList;
-use function strtolower;
-use function strpos;
+
+use function array_map;
+use function array_reverse;
 use function count;
 use function in_array;
-use function array_reverse;
 use function is_string;
-use function array_map;
+use function reset;
+use function strpos;
+use function strtolower;
 
 /**
  * @internal
@@ -175,7 +177,7 @@ class ArgumentsAnalyzer
             if (($arg->value instanceof PhpParser\Node\Expr\Closure
                     || $arg->value instanceof PhpParser\Node\Expr\ArrowFunction)
                 && $template_result
-                && $template_result->upper_bounds
+                && $template_result->lower_bounds
                 && $param
                 && !$arg->value->getDocComment()
             ) {
@@ -263,15 +265,16 @@ class ArgumentsAnalyzer
             $statements_analyzer,
             $existing_type,
             $argument_offset,
-            'fn-' . ($context->calling_method_id ?: $context->calling_function_id)
+            $context->self,
+            $context->calling_method_id ?: $context->calling_function_id
         );
 
-        if ($replace_template_result->upper_bounds) {
+        if ($replace_template_result->lower_bounds) {
             if (!$template_result) {
                 $template_result = new TemplateResult([], []);
             }
 
-            $template_result->upper_bounds += $replace_template_result->upper_bounds;
+            $template_result->lower_bounds += $replace_template_result->lower_bounds;
         }
     }
 
@@ -299,7 +302,7 @@ class ArgumentsAnalyzer
         ) {
             $function_like_params = [];
 
-            foreach ($template_result->upper_bounds as $template_name => $_) {
+            foreach ($template_result->lower_bounds as $template_name => $_) {
                 $function_like_params[] = new \Psalm\Storage\FunctionLikeParameter(
                     'function',
                     false,
@@ -325,15 +328,18 @@ class ArgumentsAnalyzer
 
         $replace_template_result = new \Psalm\Internal\Type\TemplateResult(
             array_map(
-                function ($template_map) {
+                function ($template_map) use ($codebase) {
                     return array_map(
-                        function ($bound) {
-                            return $bound->type;
+                        function ($lower_bounds) use ($codebase) {
+                            return \Psalm\Internal\Type\TemplateStandinTypeReplacer::getMostSpecificTypeFromBounds(
+                                $lower_bounds,
+                                $codebase
+                            );
                         },
                         $template_map
                     );
                 },
-                $template_result->upper_bounds
+                $template_result->lower_bounds
             ),
             []
         );
@@ -346,7 +352,7 @@ class ArgumentsAnalyzer
             null,
             null,
             null,
-            'fn-' . ($context->calling_method_id ?: $context->calling_function_id)
+            $context->calling_method_id ?: $context->calling_function_id
         );
 
         TemplateInferredTypeReplacer::replace(
@@ -560,9 +566,11 @@ class ArgumentsAnalyzer
         $class_generic_params = [];
 
         if ($class_template_result) {
-            foreach ($class_template_result->upper_bounds as $template_name => $type_map) {
-                foreach ($type_map as $class => $bound) {
-                    $class_generic_params[$template_name][$class] = clone $bound->type;
+            foreach ($class_template_result->lower_bounds as $template_name => $type_map) {
+                foreach ($type_map as $class => $lower_bounds) {
+                    if (count($lower_bounds) === 1) {
+                        $class_generic_params[$template_name][$class] = clone reset($lower_bounds)->type;
+                    }
                 }
             }
         }
@@ -981,10 +989,11 @@ class ArgumentsAnalyzer
                         $statements_analyzer,
                         $statements_analyzer->node_data->getType($arg->value),
                         $argument_offset,
-                        'fn-' . ($context->calling_method_id ?: $context->calling_function_id)
+                        $context->self,
+                        $context->calling_method_id ?: $context->calling_function_id
                     );
 
-                    if ($template_result->upper_bounds) {
+                    if ($template_result->lower_bounds) {
                         TemplateInferredTypeReplacer::replace(
                             $original_by_ref_type,
                             $template_result,
@@ -1005,10 +1014,11 @@ class ArgumentsAnalyzer
                         $statements_analyzer,
                         $statements_analyzer->node_data->getType($arg->value),
                         $argument_offset,
-                        'fn-' . ($context->calling_method_id ?: $context->calling_function_id)
+                        $context->self,
+                        $context->calling_method_id ?: $context->calling_function_id
                     );
 
-                    if ($template_result->upper_bounds) {
+                    if ($template_result->lower_bounds) {
                         TemplateInferredTypeReplacer::replace(
                             $original_by_ref_out_type,
                             $template_result,
